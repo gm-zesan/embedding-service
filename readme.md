@@ -72,12 +72,6 @@ Swagger UI
 http://127.0.0.1:8001/docs
 ```
 
-OpenAPI JSON
-
-```
-http://127.0.0.1:8001/openapi.json
-```
-
 ---
 
 ## Health Check
