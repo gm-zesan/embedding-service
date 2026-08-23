@@ -59,12 +59,31 @@ class SearchResultItem(BaseModel):
     semantic_score: float = 0.0
 
 
+class RetrievalTelemetry(BaseModel):
+    request_id: Optional[str] = None
+    workspace_id: Optional[int] = None
+    first_pass_score: float = 0.0
+    first_pass_top_id: Optional[str] = None
+    expansion_triggered: bool = False
+    expanded_query: Optional[str] = None
+    second_pass_score: Optional[float] = None
+    second_pass_top_id: Optional[str] = None
+    final_score: float = 0.0
+    first_pass_latency_ms: float = 0.0
+    expansion_latency_ms: float = 0.0
+    second_pass_latency_ms: float = 0.0
+    total_retrieval_latency_ms: float = 0.0
+    returned_faq_ids: List[str] = []
+
+
 class SearchResponse(BaseModel):
     results: List[SearchResultItem]
     query: str
     expanded_query: Optional[str] = None
     expansion_applied: bool = False
     total_found: int
+    telemetry: Optional[RetrievalTelemetry] = None
+
 
 
 class SyncFAQRequest(BaseModel):

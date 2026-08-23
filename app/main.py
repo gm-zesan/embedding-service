@@ -236,14 +236,16 @@ def health():
     tags=["Knowledge Retrieval"],
     dependencies=[Depends(verify_api_key)],
 )
-async def search_faqs(request: SearchRequest):
+async def search_faqs(request: SearchRequest, req: Request):
     """
     Search FAQs using adaptive hybrid search (Dense 768-d vector + BM25 keyword + optional LLM query expansion).
     """
+    request_id = req.headers.get("X-Request-ID") or _request_id_ctx.get()
     return await search_knowledge_base(
         query=request.query,
         workspace_id=request.workspace_id,
         top_k=request.top_k,
+        request_id=request_id,
     )
 
 

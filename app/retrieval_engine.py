@@ -1,4 +1,5 @@
 import logging
+import time
 # pyrefly: ignore [missing-import]
 import httpx
 from typing import Any, Dict, List, Optional
@@ -102,22 +103,24 @@ async def search_knowledge_base(
     query: str,
     workspace_id: Optional[int] = None,
     top_k: int = 5,
+    request_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Execute end-to-end adaptive retrieval pipeline:
+    Execute end-to-end adaptive retrieval pipeline with full observability telemetry:
     1. Light Preprocessing
     2. Dense Vector Generation
-    3. Typesense Hybrid Search
+    3. First Typesense Hybrid Search
     4. Threshold evaluation & conditional LLM query expansion
-    5. Final result fusion
+    5. Result Fusion & Regression prevention
+    6. Structured Telemetry & Latency recording
     """
+    t_total_start = time.time()
     clean_query = preprocess_query(query)
     client = get_typesense_client()
 
-    # Step 1: Generate dense vector embedding for query
+    # Step 1: Dense Vector Generation & First Hybrid Search
+    t1_start = time.time()
     query_vector = embed(clean_query)
-
-    # Step 2: First Hybrid Search
     search_res = execute_hybrid_search(
         client=client,
         query_text=clean_query,
@@ -125,19 +128,29 @@ async def search_knowledge_base(
         workspace_id=workspace_id,
         top_k=top_k,
     )
+    first_pass_latency_ms = round((time.time() - t1_start) * 1000, 2)
 
     first_pass_hits = parse_typesense_hits(search_res.get("hits", []))
-    top_score = first_pass_hits[0]["score"] if first_pass_hits else 0.0
+    first_pass_top_score = first_pass_hits[0]["score"] if first_pass_hits else 0.0
+    first_pass_top_id = first_pass_hits[0]["id"] if first_pass_hits else None
 
     expanded_query = None
     expansion_applied = False
+    expansion_latency_ms = 0.0
+    second_pass_latency_ms = 0.0
+    second_pass_top_score = None
+    second_pass_top_id = None
     final_hits = first_pass_hits
 
-    # Step 3: Adaptive LLM Expansion check (if low confidence)
-    if top_score < config.RETRIEVAL_EXPANSION_THRESHOLD and config.LLM_EXPANSION_API_KEY:
+    # Step 2: Adaptive LLM Expansion (if below threshold and key configured)
+    if first_pass_top_score < config.RETRIEVAL_EXPANSION_THRESHOLD and config.LLM_EXPANSION_API_KEY:
+        t_exp_start = time.time()
         expanded_query = await expand_query_via_llm(clean_query)
+        expansion_latency_ms = round((time.time() - t_exp_start) * 1000, 2)
+
         if expanded_query:
             expansion_applied = True
+            t2_start = time.time()
             expanded_vector = embed(expanded_query)
 
             second_search_res = execute_hybrid_search(
@@ -147,10 +160,14 @@ async def search_knowledge_base(
                 workspace_id=workspace_id,
                 top_k=top_k,
             )
+            second_pass_latency_ms = round((time.time() - t2_start) * 1000, 2)
 
             second_pass_hits = parse_typesense_hits(second_search_res.get("hits", []))
+            if second_pass_hits:
+                second_pass_top_score = second_pass_hits[0]["score"]
+                second_pass_top_id = second_pass_hits[0]["id"]
 
-            # Step 4: Result Fusion (Merge & de-duplicate preserving highest score per FAQ ID)
+            # Step 3: Result Fusion (Merge & de-duplicate preserving highest score per FAQ ID)
             hit_map: Dict[str, Dict[str, Any]] = {}
             for h in first_pass_hits:
                 hit_map[h["id"]] = h
@@ -160,7 +177,37 @@ async def search_knowledge_base(
                 if doc_id not in hit_map or h["score"] > hit_map[doc_id]["score"]:
                     hit_map[doc_id] = h
 
-            final_hits = sorted(hit_map.values(), key=lambda x: x["score"], reverse=True)[:top_k]
+            final_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)[:top_k]
+
+    total_retrieval_latency_ms = round((time.time() - t_total_start) * 1000, 2)
+    final_score = final_hits[0]["score"] if final_hits else 0.0
+    returned_faq_ids = [h["id"] for h in final_hits]
+
+    telemetry = {
+        "request_id": request_id,
+        "workspace_id": workspace_id,
+        "first_pass_score": first_pass_top_score,
+        "first_pass_top_id": first_pass_top_id,
+        "expansion_triggered": expansion_applied,
+        "expanded_query": expanded_query,
+        "second_pass_score": second_pass_top_score,
+        "second_pass_top_id": second_pass_top_id,
+        "final_score": final_score,
+        "first_pass_latency_ms": first_pass_latency_ms,
+        "expansion_latency_ms": expansion_latency_ms,
+        "second_pass_latency_ms": second_pass_latency_ms,
+        "total_retrieval_latency_ms": total_retrieval_latency_ms,
+        "returned_faq_ids": returned_faq_ids,
+    }
+
+    logger.info(
+        "[Retrieval Telemetry] query='%s' score=%.3f exp=%s total_ms=%.1f returned=%s",
+        clean_query[:50],
+        final_score,
+        "Y" if expansion_applied else "N",
+        total_retrieval_latency_ms,
+        returned_faq_ids[:3],
+    )
 
     return {
         "results": final_hits,
@@ -168,5 +215,6 @@ async def search_knowledge_base(
         "expanded_query": expanded_query,
         "expansion_applied": expansion_applied,
         "total_found": len(final_hits),
+        "telemetry": telemetry,
     }
 
