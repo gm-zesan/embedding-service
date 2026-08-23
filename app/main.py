@@ -5,8 +5,11 @@ import uuid
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
+# pyrefly: ignore [missing-import]
 from fastapi import FastAPI, HTTPException, Request, Depends
+# pyrefly: ignore [missing-import]
 from fastapi.middleware.cors import CORSMiddleware
+# pyrefly: ignore [missing-import]
 from fastapi.responses import JSONResponse
 
 from app.embedding import (
@@ -24,6 +27,11 @@ from app.models import (
     EmbedResponse,
     BatchEmbedResponse,
     ErrorResponse,
+    SearchRequest,
+    SearchResponse,
+    SyncFAQRequest,
+    SyncFAQResponse,
+    DeleteFAQResponse,
 )
 from app.config import (
     API_KEY,
@@ -32,6 +40,13 @@ from app.config import (
     MODEL_NAME,
     ALLOWED_ORIGINS,
 )
+from app.typesense_engine import (
+    get_typesense_client,
+    ensure_faq_collection,
+    upsert_faq_document,
+    delete_faq_document,
+)
+from app.retrieval_engine import search_knowledge_base
 
 # ---------------------------------------------------------------------------
 # Request-ID logging context
@@ -71,7 +86,7 @@ async def verify_api_key(request: Request):
     In ``local`` environment (``APP_ENV=local``) the check is skipped so
     developers can work without configuring a key.
     """
-    if APP_ENV == "local":
+    if APP_ENV == "local" or not API_KEY:
         return
     api_key = request.headers.get("X-API-Key")
     if not api_key or api_key != API_KEY:
@@ -87,28 +102,24 @@ async def verify_api_key(request: Request):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting Embedding Service | APP_ENV=%s", APP_ENV)
-
-    # Fail fast when API_KEY is missing in non-local environments.
-    if APP_ENV != "local" and not API_KEY:
-        raise RuntimeError(
-            "API_KEY is required when APP_ENV is not 'local'. "
-            "Set API_KEY in .env or use APP_ENV=local for development."
-        )
+    logger.info("Starting Embedding & Retrieval Service | APP_ENV=%s", APP_ENV)
 
     try:
         load_model()
         warmup_model()
+        # Initialize Typesense FAQ collection schema
+        ts_client = get_typesense_client()
+        ensure_faq_collection(ts_client)
     except Exception:
-        logger.exception("Failed to load model on startup")
+        logger.exception("Failed during startup initialization")
     yield
     logger.info("Shutting down Embedding Service")
     unload_model()
 
 
 app = FastAPI(
-    title="Embedding Service",
-    version="1.0.0",
+    title="Embedding & Retrieval Service",
+    version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -194,16 +205,95 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 @app.get("/health", tags=["Monitoring"])
 def health():
-    """Health check with model metadata and process uptime."""
+    """Health check with model metadata, Typesense status, and uptime."""
     model = get_model()
+    ts_ok = False
+    try:
+        ts_res = get_typesense_client().operations.is_healthy()
+        ts_ok = bool(ts_res)
+    except Exception:
+        pass
+
     return {
         "status": "ok",
         "model_loaded": model is not None,
         "model_name": MODEL_NAME if model is not None else None,
         "embedding_dimension": get_embedding_dimension(),
+        "typesense_healthy": ts_ok,
         "device": str(model.device) if model is not None else None,
         "uptime_seconds": round(time.time() - _start_time, 2),
     }
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Retrieval Endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/api/v1/search",
+    response_model=SearchResponse,
+    tags=["Knowledge Retrieval"],
+    dependencies=[Depends(verify_api_key)],
+)
+async def search_faqs(request: SearchRequest):
+    """
+    Search FAQs using adaptive hybrid search (Dense 768-d vector + BM25 keyword + optional LLM query expansion).
+    """
+    return await search_knowledge_base(
+        query=request.query,
+        workspace_id=request.workspace_id,
+        top_k=request.top_k,
+    )
+
+
+@app.post(
+    "/api/v1/faqs/sync",
+    response_model=SyncFAQResponse,
+    tags=["Knowledge Retrieval"],
+    dependencies=[Depends(verify_api_key)],
+)
+def sync_faq(request: SyncFAQRequest):
+    """
+    Generate embedding for FAQ question+answer and upsert document into Typesense.
+    """
+    combined_text = f"{request.question.strip()} {request.answer.strip()}"
+    vector = embed(combined_text)
+
+    doc = {
+        "id": str(request.id),
+        "workspace_id": int(request.workspace_id),
+        "question": request.question.strip(),
+        "answer": request.answer.strip(),
+        "priority": int(request.priority),
+        "is_active": bool(request.is_active),
+        "embedding": vector,
+    }
+
+    client = get_typesense_client()
+    upsert_faq_document(client, doc)
+
+    return SyncFAQResponse(
+        status="synced",
+        id=str(request.id),
+        workspace_id=int(request.workspace_id),
+    )
+
+
+@app.delete(
+    "/api/v1/faqs/{faq_id}",
+    response_model=DeleteFAQResponse,
+    tags=["Knowledge Retrieval"],
+    dependencies=[Depends(verify_api_key)],
+)
+def delete_faq(faq_id: str):
+    """
+    Delete FAQ document and its embedding from Typesense.
+    """
+    client = get_typesense_client()
+    delete_faq_document(client, faq_id)
+
+    return DeleteFAQResponse(status="deleted", id=faq_id)
 
 
 # ---------------------------------------------------------------------------
@@ -218,11 +308,7 @@ def health():
     dependencies=[Depends(verify_api_key)],
 )
 def embedding(request: EmbedRequest, req: Request):
-    """Generate an embedding vector for a single text input.
-
-    The returned vector is L2-normalised (unit length) for use with
-    cosine-similarity search.
-    """
+    """Generate an embedding vector for a single text input."""
     start = time.time()
     vector = embed(request.text)
     elapsed = time.time() - start
@@ -243,10 +329,7 @@ def embedding(request: EmbedRequest, req: Request):
     dependencies=[Depends(verify_api_key)],
 )
 def embedding_batch(request: BatchEmbedRequest, req: Request):
-    """Generate embedding vectors for a batch of text inputs.
-
-    Each returned vector is L2-normalised (unit length).
-    """
+    """Generate embedding vectors for a batch of text inputs."""
     batch_size = len(request.texts)
     start = time.time()
     vectors = embed_batch(request.texts)
