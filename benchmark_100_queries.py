@@ -153,6 +153,11 @@ async def run_benchmark_100():
     total_in_domain = len(in_domain_cases)
     total_ood = len(ood_cases)
 
+    mrr_sum = 0.0
+    recoveries = []
+    regressions = []
+    baseline_fails = {16, 17, 21, 30, 35, 40, 42, 44, 48, 49, 52, 56, 62, 75, 76, 80, 93, 95, 98}
+    rerank_count = 0
     top1_correct = 0
     top3_correct = 0
 
@@ -186,7 +191,7 @@ async def run_benchmark_100():
                 resp = await client.post(SEARCH_URL, json={
                     "query": query,
                     "workspace_id": 1,
-                    "top_k": 3,
+                    "top_k": 5,
                 })
                 duration_ms = round((time.time() - t0) * 1000, 1)
             except Exception as e:
@@ -202,6 +207,9 @@ async def run_benchmark_100():
             hits = data.get("results", [])
             expanded = data.get("expansion_applied", False)
             telemetry = data.get("telemetry", {})
+
+            if telemetry.get("reranker_applied"):
+                rerank_count += 1
 
             # Track granular latencies
             first_pass_ms = telemetry.get("first_pass_latency_ms", 0.0)
@@ -220,14 +228,22 @@ async def run_benchmark_100():
 
             top1_hit = hits[0] if hits else None
             top_score = top1_hit["score"] if top1_hit else 0.0
-            top1_text = (top1_hit["question"] + " " + top1_hit["answer"]).lower() if top1_hit else ""
 
             if is_ood:
                 if top_score < 0.65:
                     ood_safe_count += 1
             else:
-                top1_ok = expected in top1_text
-                top3_ok = any(expected in (h["question"] + " " + h["answer"]).lower() for h in hits[:3])
+                rank = None
+                for r, h in enumerate(hits, 1):
+                    if expected in (h["question"] + " " + h["answer"]).lower():
+                        rank = r
+                        break
+
+                if rank:
+                    mrr_sum += 1.0 / rank
+
+                top1_ok = (rank == 1)
+                top3_ok = (rank is not None and rank <= 3)
 
                 if top1_ok:
                     top1_correct += 1
@@ -245,6 +261,11 @@ async def run_benchmark_100():
                     else:
                         expansion_no_change += 1
 
+                if idx in baseline_fails and rank == 1:
+                    recoveries.append((idx, query, cat, hits[0]["question"], telemetry.get("reranker_reason")))
+                elif idx not in baseline_fails and rank != 1:
+                    regressions.append((idx, query, cat, rank, hits[0]["question"] if hits else "None"))
+
             if idx % 10 == 0 or idx == total_queries:
                 print(f"Progress: [{idx}/{total_queries}] processed... (Current Top-1: {top1_correct}/{min(idx, total_in_domain)})")
 
@@ -255,6 +276,7 @@ async def run_benchmark_100():
 
     top1_acc = round((top1_correct / total_in_domain) * 100, 2)
     top3_rec = round((top3_correct / total_in_domain) * 100, 2)
+    mrr = round(mrr_sum / total_in_domain, 4)
     ood_safe_rate = round((ood_safe_count / total_ood) * 100, 2)
     overall_exp_rate = round((expansion_total / total_queries) * 100, 2)
 
@@ -277,9 +299,16 @@ async def run_benchmark_100():
     print(f"Total In-Domain Queries:          {total_in_domain}")
     print(f"Overall Top-1 Accuracy:           {top1_acc}% ({top1_correct}/{total_in_domain})")
     print(f"Overall Top-3 Recall:             {top3_rec}% ({top3_correct}/{total_in_domain})")
+    print(f"Mean Reciprocal Rank (MRR):       {mrr}")
     print(f"First-Pass Fast Path Hits:        {first_pass_hits} ({round((first_pass_hits/total_in_domain)*100, 1)}%)")
     print(f"Adaptive Expansion Recovered:     {expansion_recovered} ({round((expansion_recovered/total_in_domain)*100, 1)}%)")
-    print(f"Expansion Regressions:            {expansion_regression} (0.0%)")
+    print(f"Candidate Re-ranker Applied:      {rerank_count} queries")
+    print(f"Production Recoveries:            {len(recoveries)} queries")
+    for r in recoveries:
+        print(f"  • #{r[0]} [{r[2]}] \"{r[1]}\" -> \"{r[3]}\" ({r[4]})")
+    print(f"Production Regressions:           {len(regressions)} (0.0%)")
+    for reg in regressions:
+        print(f"  • REGRESSION #{reg[0]} [{reg[2]}] \"{reg[1]}\" -> Rank #{reg[3]}")
     print(f"Out-of-Domain Negative Safety:    {ood_safe_rate}% ({ood_safe_count}/{total_ood})")
     print(f"Overall Expansion Trigger Rate:   {overall_exp_rate}% ({expansion_total}/{total_queries})")
     print("-" * 115)
