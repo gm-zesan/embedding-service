@@ -98,7 +98,6 @@ def parse_typesense_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return results
 
 
-<<<<<<< Updated upstream
 # ---------------------------------------------------------------------------
 # Post-Retrieval Candidate Reranker (B1 Action Alignment & B2 Multi-Entity)
 # ---------------------------------------------------------------------------
@@ -180,80 +179,6 @@ def rerank_candidate_hits(query: str, raw_hits: List[Dict[str, Any]]) -> tuple[L
     hits.sort(key=lambda x: (x["score"], x.get("priority", 0)), reverse=True)
     reason_str = ", ".join(reasons) if applied else None
     return hits, applied, reason_str
-=======
-def rerank_candidate_hits(
-    query: str,
-    hits: List[Dict[str, Any]],
-) -> tuple[List[Dict[str, Any]], bool, Optional[str]]:
-    """
-    Precision Candidate Re-ranker for B1 (close-delta) and B2 (multi-entity keyword trap) resolution.
-    Runs in-memory on the top candidates (zero latency overhead).
-    Does NOT alter underlying embeddings or Typesense index.
-    """
-    if not config.RERANKER_ENABLED or not hits:
-        return hits, False, None
-
-    q_lower = query.lower()
-    top1 = hits[0]
-    top1_q = top1.get("question", "").lower()
-    top1_score = top1.get("score", 0.0)
-
-    # -------------------------------------------------------------
-    # Rule 1: B2 Multi-Entity Channel Intent (Telegram + Facebook / Multiple channels)
-    # -------------------------------------------------------------
-    if config.RERANKER_MULTI_ENTITY_ENABLED:
-        has_multi_channel_cues = (
-            ("telegram" in q_lower and ("facebook" in q_lower or "page" in q_lower or "both" in q_lower or "multiple" in q_lower or "together" in q_lower))
-            or ("multiple channels" in q_lower or "ekadik channel" in q_lower or "koyta channel" in q_lower or "simultaneously" in q_lower)
-        )
-        if has_multi_channel_cues:
-            for idx, h in enumerate(hits):
-                h_q = h.get("question", "").lower()
-                if "multiple channels" in h_q and idx > 0:
-                    reranked = [h] + [x for i, x in enumerate(hits) if i != idx]
-                    reranked[0]["score"] = max(top1_score + 0.001, reranked[0]["score"])
-                    return reranked, True, "multi_entity_boost"
-
-    # -------------------------------------------------------------
-    # Rule 2: B1 Action Alignment on Close Score Delta (delta <= RERANKER_CLOSE_DELTA)
-    # -------------------------------------------------------------
-    close_delta = config.RERANKER_CLOSE_DELTA
-
-    # Action Target 1: Payment Method / Credit Card
-    payment_cues = ["credit card", "card info", "new card", "payment method", "change card", "card kivabe change", "notun payment method", "card add"]
-    if any(cue in q_lower for cue in payment_cues):
-        for idx, h in enumerate(hits[:3]):
-            h_q = h.get("question", "").lower()
-            if "payment method" in h_q and idx > 0:
-                if (top1_score - h["score"]) <= close_delta or "error" in top1_q or "faq" in top1_q:
-                    reranked = [h] + [x for i, x in enumerate(hits) if i != idx]
-                    reranked[0]["score"] = max(top1_score + 0.001, reranked[0]["score"])
-                    return reranked, True, "action_align_payment_method"
-
-    # Action Target 2: Plan Change / Billing Cycle
-    plan_cues = ["switch from monthly to annual", "monthly to annual", "change my plan", "plan upgrade", "plan change", "upgrade plan", "package change", "package upgrade"]
-    if any(cue in q_lower for cue in plan_cues):
-        for idx, h in enumerate(hits[:3]):
-            h_q = h.get("question", "").lower()
-            if "change my plan" in h_q and idx > 0:
-                if (top1_score - h["score"]) <= close_delta:
-                    reranked = [h] + [x for i, x in enumerate(hits) if i != idx]
-                    reranked[0]["score"] = max(top1_score + 0.001, reranked[0]["score"])
-                    return reranked, True, "action_align_plan_change"
-
-    # Action Target 3: Invoices / Money Receipts
-    invoice_cues = ["invoice", "invoices", "money receipt", "download receipt", "receipts", "purono invoice", "আগের মাসের পেমেন্টের ইনভয়েস", "পেমেন্টের ইনভয়েস"]
-    if any(cue in q_lower for cue in invoice_cues):
-        for idx, h in enumerate(hits[:3]):
-            h_q = h.get("question", "").lower()
-            if "view my invoices" in h_q and idx > 0:
-                if (top1_score - h["score"]) <= close_delta:
-                    reranked = [h] + [x for i, x in enumerate(hits) if i != idx]
-                    reranked[0]["score"] = max(top1_score + 0.001, reranked[0]["score"])
-                    return reranked, True, "action_align_invoice"
-
-    return hits, False, None
->>>>>>> Stashed changes
 
 
 async def search_knowledge_base(
@@ -275,11 +200,7 @@ async def search_knowledge_base(
     t_total_start = time.time()
     clean_query = preprocess_query(query)
     client = get_typesense_client()
-<<<<<<< Updated upstream
     candidate_pool = max(5, top_k)
-=======
-    candidate_pool_size = max(5, top_k)
->>>>>>> Stashed changes
 
     # Step 1: Dense Vector Generation & First Hybrid Search
     t1_start = time.time()
@@ -289,11 +210,7 @@ async def search_knowledge_base(
         query_text=clean_query,
         query_vector=query_vector,
         workspace_id=workspace_id,
-<<<<<<< Updated upstream
         top_k=candidate_pool,
-=======
-        top_k=candidate_pool_size,
->>>>>>> Stashed changes
     )
     first_pass_latency_ms = round((time.time() - t1_start) * 1000, 2)
 
@@ -325,11 +242,7 @@ async def search_knowledge_base(
                 query_text=f"{clean_query} {expanded_query}",
                 query_vector=expanded_vector,
                 workspace_id=workspace_id,
-<<<<<<< Updated upstream
                 top_k=candidate_pool,
-=======
-                top_k=candidate_pool_size,
->>>>>>> Stashed changes
             )
             second_pass_latency_ms = round((time.time() - t2_start) * 1000, 2)
 
@@ -348,19 +261,11 @@ async def search_knowledge_base(
                 if doc_id not in hit_map or h["score"] > hit_map[doc_id]["score"]:
                     hit_map[doc_id] = h
 
-<<<<<<< Updated upstream
             final_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)[:candidate_pool]
 
     # Step 4: Post-Retrieval Precision Reranking (B1 Action Alignment & B2 Multi-Entity)
     reranked_hits, reranker_applied, reranker_reason = rerank_candidate_hits(clean_query, final_hits)
     final_hits = reranked_hits[:top_k]
-=======
-            final_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)
-
-    # Step 4: Candidate Re-ranking (Precision Layer for B1 close-delta and B2 multi-entity)
-    final_hits, reranker_applied, reranker_reason = rerank_candidate_hits(clean_query, final_hits)
-    final_hits = final_hits[:top_k]
->>>>>>> Stashed changes
 
     total_retrieval_latency_ms = round((time.time() - t_total_start) * 1000, 2)
     final_score = final_hits[0]["score"] if final_hits else 0.0
