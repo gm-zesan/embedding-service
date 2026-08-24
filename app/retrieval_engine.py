@@ -94,9 +94,91 @@ def parse_typesense_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "semantic_score": semantic_score,
         })
 
-    # Sort results by final score descending, breaking ties with priority
     results.sort(key=lambda r: (r["score"], r["priority"]), reverse=True)
     return results
+
+
+# ---------------------------------------------------------------------------
+# Post-Retrieval Candidate Reranker (B1 Action Alignment & B2 Multi-Entity)
+# ---------------------------------------------------------------------------
+
+ACTION_INTENT_MAP = {
+    "invoice": {
+        "actions": ["view", "download", "receipt", "history", "see", "find", "আগের", "রসিদ", "ইনভয়েস", "দেখতে", "পাবো", "purono", "kothay", "pabo"],
+        "target_phrase": "how do i view my invoices?",
+        "penalty_phrase": "how do i update my payment method?"
+    },
+    "payment_method": {
+        "actions": ["update", "change payment", "credit card", "card info", "add card", "পেমেন্ট মেথড", "কার্ড পরিবর্তন", "notun card"],
+        "target_phrase": "how do i update my payment method?",
+        "penalty_phrase": "how do i view my invoices?"
+    },
+    "plan_change": {
+        "actions": ["switch", "upgrade", "downgrade", "annual", "monthly to annual", "প্ল্যান পরিবর্তন", "আপগ্রেড", "plan change", "change plan"],
+        "target_phrase": "can i change my plan?",
+        "penalty_phrase": "how do i update my payment method?"
+    },
+}
+
+MULTI_ENTITY_CUES = [
+    "both", "together", "simultaneously", "multiple channels", "একই সাথে",
+    "একাধিক", "একসাথে", "ekshathe", "ekoi shathe", "duto eksathe"
+]
+
+
+def rerank_candidate_hits(query: str, raw_hits: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], bool, Optional[str]]:
+    """
+    Precision re-ranker applied strictly over Top-5 candidate results.
+    Preserves original score ordering when no high-confidence signals match.
+    Returns: (reranked_hits, reranker_applied, reranker_reason)
+    """
+    if not config.RERANKER_ENABLED or not raw_hits or len(raw_hits) <= 1:
+        return raw_hits, False, None
+
+    hits = [dict(h) for h in raw_hits]
+    q_lower = query.lower()
+    applied = False
+    reasons = []
+
+    # 1. B2 Multi-Entity Intent Boost (overcomes single-channel BM25 trap)
+    if config.RERANKER_MULTI_ENTITY_ENABLED:
+        is_multi_entity = any(cue in q_lower for cue in MULTI_ENTITY_CUES)
+        if is_multi_entity:
+            for h in hits:
+                q_title = h["question"].lower()
+                if "multiple" in q_title or "simultaneously" in q_title or "channels" in q_title:
+                    h["score"] = round(h["score"] + 0.18, 4)
+                    applied = True
+                    reasons.append("multi_entity_boost")
+
+    hits.sort(key=lambda x: (x["score"], x.get("priority", 0)), reverse=True)
+
+    # 2. B1 Action/Intent Alignment Tie-Breaking on close delta
+    top1 = hits[0]
+    for i in range(1, min(3, len(hits))):
+        cand = hits[i]
+        delta = round(top1["score"] - cand["score"], 4)
+        if 0.0 < delta <= config.RERANKER_CLOSE_DELTA:
+            cand_q = cand["question"].lower()
+            top1_q = top1["question"].lower()
+
+            for intent_name, intent_data in ACTION_INTENT_MAP.items():
+                matched_action = any(act in q_lower for act in intent_data["actions"])
+                if matched_action:
+                    if intent_data["target_phrase"] in cand_q and intent_data["penalty_phrase"] in top1_q:
+                        cand["score"] = round(top1["score"] + 0.015, 4)
+                        applied = True
+                        reasons.append(f"action_align_{intent_name}")
+                        break
+                    elif intent_data["target_phrase"] in cand_q and intent_data["target_phrase"] not in top1_q:
+                        cand["score"] = round(top1["score"] + 0.012, 4)
+                        applied = True
+                        reasons.append(f"action_align_{intent_name}")
+                        break
+
+    hits.sort(key=lambda x: (x["score"], x.get("priority", 0)), reverse=True)
+    reason_str = ", ".join(reasons) if applied else None
+    return hits, applied, reason_str
 
 
 async def search_knowledge_base(
@@ -117,6 +199,7 @@ async def search_knowledge_base(
     t_total_start = time.time()
     clean_query = preprocess_query(query)
     client = get_typesense_client()
+    candidate_pool = max(5, top_k)
 
     # Step 1: Dense Vector Generation & First Hybrid Search
     t1_start = time.time()
@@ -126,7 +209,7 @@ async def search_knowledge_base(
         query_text=clean_query,
         query_vector=query_vector,
         workspace_id=workspace_id,
-        top_k=top_k,
+        top_k=candidate_pool,
     )
     first_pass_latency_ms = round((time.time() - t1_start) * 1000, 2)
 
@@ -158,7 +241,7 @@ async def search_knowledge_base(
                 query_text=f"{clean_query} {expanded_query}",
                 query_vector=expanded_vector,
                 workspace_id=workspace_id,
-                top_k=top_k,
+                top_k=candidate_pool,
             )
             second_pass_latency_ms = round((time.time() - t2_start) * 1000, 2)
 
@@ -177,7 +260,11 @@ async def search_knowledge_base(
                 if doc_id not in hit_map or h["score"] > hit_map[doc_id]["score"]:
                     hit_map[doc_id] = h
 
-            final_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)[:top_k]
+            final_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)[:candidate_pool]
+
+    # Step 4: Post-Retrieval Precision Reranking (B1 Action Alignment & B2 Multi-Entity)
+    reranked_hits, reranker_applied, reranker_reason = rerank_candidate_hits(clean_query, final_hits)
+    final_hits = reranked_hits[:top_k]
 
     total_retrieval_latency_ms = round((time.time() - t_total_start) * 1000, 2)
     final_score = final_hits[0]["score"] if final_hits else 0.0
@@ -198,13 +285,16 @@ async def search_knowledge_base(
         "second_pass_latency_ms": second_pass_latency_ms,
         "total_retrieval_latency_ms": total_retrieval_latency_ms,
         "returned_faq_ids": returned_faq_ids,
+        "reranker_applied": reranker_applied,
+        "reranker_reason": reranker_reason,
     }
 
     logger.info(
-        "[Retrieval Telemetry] query='%s' score=%.3f exp=%s total_ms=%.1f returned=%s",
+        "[Retrieval Telemetry] query='%s' score=%.3f exp=%s rerank=%s total_ms=%.1f returned=%s",
         clean_query[:50],
         final_score,
         "Y" if expansion_applied else "N",
+        "Y" if reranker_applied else "N",
         total_retrieval_latency_ms,
         returned_faq_ids[:3],
     )

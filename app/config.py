@@ -40,3 +40,8 @@ RETRIEVAL_EXPANSION_THRESHOLD = float(os.getenv("RETRIEVAL_EXPANSION_THRESHOLD",
 LLM_EXPANSION_API_KEY = os.getenv("LLM_EXPANSION_API_KEY", "")
 LLM_EXPANSION_BASE_URL = os.getenv("LLM_EXPANSION_BASE_URL", "https://api.deepseek.com/v1")
 LLM_EXPANSION_MODEL = os.getenv("LLM_EXPANSION_MODEL", "deepseek-chat")
+
+# -- Post-Retrieval Candidate Reranker --
+RERANKER_ENABLED = os.getenv("RERANKER_ENABLED", "true").lower() in ("true", "1")
+RERANKER_CLOSE_DELTA = float(os.getenv("RERANKER_CLOSE_DELTA", "0.06"))
+RERANKER_MULTI_ENTITY_ENABLED = os.getenv("RERANKER_MULTI_ENTITY_ENABLED", "true").lower() in ("true", "1")

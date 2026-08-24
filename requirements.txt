@@ -3,3 +3,5 @@ uvicorn[standard]==0.35.0
 sentence-transformers==5.1.0
 torch>=2.7
 python-dotenv==1.1.1
+typesense>=2.0.0
+httpx>=0.28.0

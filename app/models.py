@@ -74,6 +74,8 @@ class RetrievalTelemetry(BaseModel):
     second_pass_latency_ms: float = 0.0
     total_retrieval_latency_ms: float = 0.0
     returned_faq_ids: List[str] = []
+    reranker_applied: bool = False
+    reranker_reason: Optional[str] = None
 
 
 class SearchResponse(BaseModel):
