@@ -15,26 +15,94 @@ def preprocess_query(query: str) -> str:
     return " ".join(query.strip().split())
 
 
+# ---------------------------------------------------------------------------
+# Tier 2: Local Deterministic Domain & Synonym Normalizer (0 ms, offline)
+# ---------------------------------------------------------------------------
+LOCAL_DOMAIN_SYNONYMS = {
+    # 1. Account & Registration
+    "notun akaunt": "create account register sign up",
+    "akaunt khulbo": "create account register",
+    "account khulbo": "create account register",
+    "notun account": "create account register sign up",
+    "নতুন একাউন্ট": "create account register sign up",
+    "একাউন্ট খুলব": "create account register",
+    "একাউন্ট তৈরি": "create account register",
+    "কীভাবে একাউন্ট": "create account register",
+    # 2. Login, Auth & 2FA
+    "login korbo": "login sign in access account",
+    "dhukbo": "login sign in",
+    "লগইন": "login sign in",
+    "পাসওয়ার্ড ভুলে": "forgot reset password",
+    "password vule": "forgot reset password",
+    "2 step": "two factor authentication 2fa enable security",
+    "2-step": "two factor authentication 2fa enable security",
+    "2fa": "two factor authentication enable security",
+    "two factor": "two factor authentication 2fa enable security",
+    # 3. Invoices, Receipts & Statements
+    "purono bill": "view invoices receipt history",
+    "purono invoice": "view invoices receipt history",
+    "আগের ইনভয়েস": "view invoices receipt history",
+    "রসিদ দেখতে": "view invoices receipt history",
+    "tax invoice": "view invoices receipt download",
+    "download invoice": "view invoices receipt download",
+    # 4. Payment Method & Cards
+    "card change": "update payment method credit card",
+    "notun card": "update payment method credit card",
+    "কার্ড পরিবর্তন": "update payment method credit card",
+    "পেমেন্ট মেথড": "update payment method credit card",
+    "credit card update": "update payment method credit card",
+    # 5. Refunds, Money Back & Reversals
+    "taka ferot": "refund payment reversal money back policy",
+    "money back": "refund payment reversal policy",
+    "payment reversal": "refund payment reversal policy",
+    "টাকা ফেরত": "refund payment reversal money back policy",
+    # 6. Subscription Plans & Upgrades
+    "plan change": "change subscription plan upgrade",
+    "plan switch": "change subscription plan upgrade",
+    "প্ল্যান পরিবর্তন": "change subscription plan upgrade",
+    "upgrade plan": "change subscription plan upgrade monthly to annual",
+    "annual billing": "change subscription plan upgrade monthly to annual",
+    # 7. Multi-channel & Platform Integrations
+    "duto eksathe": "connect multiple channels simultaneously",
+    "ekshathe": "multiple channels simultaneously",
+    "একই সাথে": "multiple channels simultaneously",
+    "একসাথে": "multiple channels simultaneously",
+    "whatsapp connect": "connect link whatsapp business channel",
+    "telegram connect": "connect link telegram bot channel",
+}
+
+
+def expand_locally(clean_query: str) -> str:
+    """Instant deterministic local domain expansion (0 ms, offline)."""
+    q_lower = clean_query.lower()
+    expansions = []
+    for pattern, syns in LOCAL_DOMAIN_SYNONYMS.items():
+        if pattern in q_lower:
+            expansions.append(syns)
+    if expansions:
+        return clean_query + " " + " ".join(expansions)
+    return clean_query
+
+
 async def expand_query_via_llm(query: str) -> Optional[str]:
     """
-    Call a fast LLM to expand/reformulate an ambiguous or transliterated query into clear retrieval keywords.
-    NOTE: The LLM NEVER generates answers; it only produces concise search keywords.
+    Tier 3 Escape Hatch: Fast LLM query reformulator for long-tail, unseen colloquial queries.
+    Strictly bounded by a 2.0s timeout to protect user latency.
     """
     if not config.LLM_EXPANSION_API_KEY:
         return None
 
     system_prompt = (
-        "You are an AI Search Query Expander for an e-commerce / customer support knowledge base. "
-        "Your ONLY task is to convert the user query (which might be in Bengali, Banglish, or informal English) "
-        "into 3-5 concise, formal English search keywords and synonyms relevant to company policies, FAQ, and account/order actions. "
-        "Do NOT answer the question. Do NOT output explanations. Return ONLY comma-separated search terms."
+        "You are an AI Search Query Expander for an enterprise customer support knowledge base. "
+        "Convert the user query into 3-5 concise, formal English search keywords and synonyms relevant to FAQ topics. "
+        "Do NOT answer the question. Return ONLY comma-separated search terms."
     )
 
     headers = {
         "Authorization": f"Bearer {config.LLM_EXPANSION_API_KEY}",
         "Content-Type": "application/json",
         "HTTP-Referer": "http://localhost:8001",
-        "X-Title": "Chatbot Retrieval Engine",
+        "X-Title": "Chatbot Retrieval Escape Hatch",
     }
 
     payload = {
@@ -44,24 +112,25 @@ async def expand_query_via_llm(query: str) -> Optional[str]:
             {"role": "user", "content": query},
         ],
         "temperature": 0.1,
-        "max_tokens": 60,
+        "max_tokens": 40,
     }
 
     url = f"{config.LLM_EXPANSION_BASE_URL.rstrip('/')}/chat/completions"
 
     try:
-        async with httpx.AsyncClient(timeout=4.0) as client:
+        timeout_cfg = httpx.Timeout(1.5, connect=0.8)
+        async with httpx.AsyncClient(timeout=timeout_cfg) as client:
             resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code == 200:
                 data = resp.json()
                 expanded = data["choices"][0]["message"]["content"].strip()
-                logger.info("LLM Query Expansion: '%s' -> '%s'", query, expanded)
+                logger.info("Tier 3 LLM Expansion: '%s' -> '%s'", query, expanded)
                 return expanded
             else:
-                logger.warning("LLM expansion failed HTTP %s: %s", resp.status_code, resp.text)
+                logger.warning("Tier 3 LLM expansion failed HTTP %s: %s", resp.status_code, resp.text)
                 return None
     except Exception as e:
-        logger.warning("LLM query expansion exception: %s", e)
+        logger.warning("Tier 3 LLM query expansion exception (bypassed safely): %s", e)
         return None
 
 
@@ -81,7 +150,7 @@ def parse_typesense_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         else:
             semantic_score = 0.0
             match_type = "keyword"
-            final_score = 0.50  # Baseline score for keyword-only matches without embedding
+            final_score = 0.20  # Low baseline score for keyword-only matches without vector similarity
 
         results.append({
             "id": str(doc.get("id")),
@@ -140,7 +209,7 @@ def rerank_candidate_hits(query: str, raw_hits: List[Dict[str, Any]]) -> tuple[L
     applied = False
     reasons = []
 
-    # 1. B2 Multi-Entity Intent Boost (overcomes single-channel BM25 trap)
+    # 1. B2 Multi-Entity Intent Boost
     if config.RERANKER_MULTI_ENTITY_ENABLED:
         is_multi_entity = any(cue in q_lower for cue in MULTI_ENTITY_CUES)
         if is_multi_entity:
@@ -181,6 +250,10 @@ def rerank_candidate_hits(query: str, raw_hits: List[Dict[str, Any]]) -> tuple[L
     return hits, applied, reason_str
 
 
+# ---------------------------------------------------------------------------
+# 3-Tier Adaptive Retrieval Execution Engine
+# ---------------------------------------------------------------------------
+
 async def search_knowledge_base(
     query: str,
     workspace_id: Optional[int] = None,
@@ -188,83 +261,91 @@ async def search_knowledge_base(
     request_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Execute end-to-end adaptive retrieval pipeline with full observability telemetry:
-    1. Light Preprocessing
-    2. Dense Vector Generation
-    3. First Typesense Hybrid Search
-    4. Threshold evaluation & conditional LLM query expansion
-    5. Result Fusion & Regression prevention
-    6. Candidate Re-ranking (B1/B2 precision)
-    7. Structured Telemetry & Latency recording
+    Tiered Adaptive Retrieval Pipeline:
+    • Tier 1: Fast-path Raw Dense Vector + Hybrid Search (< 30ms)
+    • Tier 2: Local Deterministic Domain & Synonym Normalization (if Tier 1 < 0.55) (< 35ms)
+    • Tier 3: Controlled Escape-Hatch LLM Expansion (only if score remains < 0.35 on unseen queries)
+    • Candidate Precision Reranking (B1 Action Alignment & B2 Multi-Entity)
     """
     t_total_start = time.time()
     clean_query = preprocess_query(query)
     client = get_typesense_client()
     candidate_pool = max(5, top_k)
 
-    # Step 1: Dense Vector Generation & First Hybrid Search
+    tier_executed = "tier1_raw_fastpath"
+    expansion_applied = False
+    expanded_query = None
+
+    # ── Tier 1: Fast-Path Raw Dense Hybrid Search ──────────────────────────────
     t1_start = time.time()
-    query_vector = embed(clean_query)
-    search_res = execute_hybrid_search(
+    raw_vector = embed(clean_query)
+    first_search_res = execute_hybrid_search(
         client=client,
         query_text=clean_query,
-        query_vector=query_vector,
+        query_vector=raw_vector,
         workspace_id=workspace_id,
         top_k=candidate_pool,
     )
-    first_pass_latency_ms = round((time.time() - t1_start) * 1000, 2)
-
-    first_pass_hits = parse_typesense_hits(search_res.get("hits", []))
+    first_pass_hits = parse_typesense_hits(first_search_res.get("hits", []))
     first_pass_top_score = first_pass_hits[0]["score"] if first_pass_hits else 0.0
     first_pass_top_id = first_pass_hits[0]["id"] if first_pass_hits else None
+    current_hits = first_pass_hits
 
-    expanded_query = None
-    expansion_applied = False
-    expansion_latency_ms = 0.0
-    second_pass_latency_ms = 0.0
-    second_pass_top_score = None
-    second_pass_top_id = None
-    final_hits = first_pass_hits
-
-    # Step 2: Adaptive LLM Expansion (if below threshold and key configured)
-    if first_pass_top_score < config.RETRIEVAL_EXPANSION_THRESHOLD and config.LLM_EXPANSION_API_KEY:
-        t_exp_start = time.time()
-        expanded_query = await expand_query_via_llm(clean_query)
-        expansion_latency_ms = round((time.time() - t_exp_start) * 1000, 2)
-
-        if expanded_query:
+    # ── Tier 2: Deterministic Domain & Synonym Expansion ───────────────────────
+    # If raw query score is moderate/low (< 0.55), apply local domain synonyms (0ms latency penalty)
+    if first_pass_top_score < 0.55:
+        local_expanded = expand_locally(clean_query)
+        if local_expanded != clean_query:
+            tier_executed = "tier2_local_deterministic"
             expansion_applied = True
-            t2_start = time.time()
-            expanded_vector = embed(expanded_query)
-
-            second_search_res = execute_hybrid_search(
+            expanded_query = local_expanded
+            
+            t2_vec = embed(local_expanded)
+            t2_search_res = execute_hybrid_search(
                 client=client,
-                query_text=f"{clean_query} {expanded_query}",
-                query_vector=expanded_vector,
+                query_text=local_expanded,
+                query_vector=t2_vec,
                 workspace_id=workspace_id,
                 top_k=candidate_pool,
             )
-            second_pass_latency_ms = round((time.time() - t2_start) * 1000, 2)
+            t2_hits = parse_typesense_hits(t2_search_res.get("hits", []))
+            
+            # Non-destructive result fusion
+            hit_map = {h["id"]: h for h in first_pass_hits}
+            for h in t2_hits:
+                if h["id"] not in hit_map or h["score"] > hit_map[h["id"]]["score"]:
+                    hit_map[h["id"]] = h
+            current_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)[:candidate_pool]
 
-            second_pass_hits = parse_typesense_hits(second_search_res.get("hits", []))
-            if second_pass_hits:
-                second_pass_top_score = second_pass_hits[0]["score"]
-                second_pass_top_id = second_pass_hits[0]["id"]
+    # ── Tier 3: Controlled Escape-Hatch LLM Expansion ──────────────────────────
+    # Only triggered if after Tier 1 & 2 the top score remains critically low (< 0.35)
+    current_top_score = current_hits[0]["score"] if current_hits else 0.0
+    if current_top_score < 0.35 and config.LLM_EXPANSION_API_KEY:
+        llm_expanded = await expand_query_via_llm(clean_query)
+        if llm_expanded:
+            tier_executed = "tier3_llm_escape_hatch"
+            expansion_applied = True
+            expanded_query = f"{clean_query} {llm_expanded}"
 
-            # Step 3: Result Fusion (Merge & de-duplicate preserving highest score per FAQ ID)
-            hit_map: Dict[str, Dict[str, Any]] = {}
-            for h in first_pass_hits:
-                hit_map[h["id"]] = h
+            t3_vec = embed(expanded_query)
+            t3_search_res = execute_hybrid_search(
+                client=client,
+                query_text=expanded_query,
+                query_vector=t3_vec,
+                workspace_id=workspace_id,
+                top_k=candidate_pool,
+            )
+            t3_hits = parse_typesense_hits(t3_search_res.get("hits", []))
 
-            for h in second_pass_hits:
-                doc_id = h["id"]
-                if doc_id not in hit_map or h["score"] > hit_map[doc_id]["score"]:
-                    hit_map[doc_id] = h
+            # Non-destructive result fusion
+            hit_map = {h["id"]: h for h in current_hits}
+            for h in t3_hits:
+                if h["id"] not in hit_map or h["score"] > hit_map[h["id"]]["score"]:
+                    hit_map[h["id"]] = h
+            current_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)[:candidate_pool]
 
-            final_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)[:candidate_pool]
-
-    # Step 4: Post-Retrieval Precision Reranking (B1 Action Alignment & B2 Multi-Entity)
-    reranked_hits, reranker_applied, reranker_reason = rerank_candidate_hits(clean_query, final_hits)
+    # ── Post-Retrieval Precision Reranking (B1 Action Alignment & B2 Multi-Entity) ──
+    reranked_hits, reranker_applied, reranker_reason = rerank_candidate_hits(clean_query, current_hits)
     final_hits = reranked_hits[:top_k]
 
     total_retrieval_latency_ms = round((time.time() - t_total_start) * 1000, 2)
@@ -274,30 +355,28 @@ async def search_knowledge_base(
     telemetry = {
         "request_id": request_id,
         "workspace_id": workspace_id,
+        "tier_executed": tier_executed,
         "first_pass_score": first_pass_top_score,
         "first_pass_top_id": first_pass_top_id,
         "expansion_triggered": expansion_applied,
         "expanded_query": expanded_query,
-        "second_pass_score": second_pass_top_score,
-        "second_pass_top_id": second_pass_top_id,
-        "final_score": final_score,
-        "first_pass_latency_ms": first_pass_latency_ms,
-        "expansion_latency_ms": expansion_latency_ms,
-        "second_pass_latency_ms": second_pass_latency_ms,
-        "total_retrieval_latency_ms": total_retrieval_latency_ms,
-        "returned_faq_ids": returned_faq_ids,
         "reranker_applied": reranker_applied,
         "reranker_reason": reranker_reason,
+        "final_score": final_score,
+        "latency_total_ms": total_retrieval_latency_ms,
+        "returned_faq_ids": returned_faq_ids,
     }
 
     logger.info(
-        "[Retrieval Telemetry] query='%s' score=%.3f exp=%s rerank=%s total_ms=%.1f returned=%s",
-        clean_query[:50],
+        "Search: '%s' -> %d hits, tier=%s, score=%.4f (first_pass=%.4f), reranked=%s (%s), latency=%.2fms",
+        clean_query,
+        len(final_hits),
+        tier_executed,
         final_score,
-        "Y" if expansion_applied else "N",
-        "Y" if reranker_applied else "N",
+        first_pass_top_score,
+        reranker_applied,
+        reranker_reason or "none",
         total_retrieval_latency_ms,
-        returned_faq_ids[:3],
     )
 
     return {
@@ -308,4 +387,5 @@ async def search_knowledge_base(
         "total_found": len(final_hits),
         "telemetry": telemetry,
     }
+
 
