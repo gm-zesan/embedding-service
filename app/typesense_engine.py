@@ -31,13 +31,21 @@ def ensure_faq_collection(client: typesense.Client) -> None:
             {'name': 'priority', 'type': 'int32'},
             {'name': 'is_active', 'type': 'bool'},
             {'name': 'embedding', 'type': 'float[]', 'num_dim': 768},
+            {'name': 'lexicon_terms', 'type': 'string[]', 'optional': True},
         ],
         'default_sorting_field': 'priority',
     }
 
     try:
-        client.collections[config.TYPESENSE_COLLECTION].retrieve()
+        col = client.collections[config.TYPESENSE_COLLECTION].retrieve()
         logger.info("Typesense collection '%s' already exists.", config.TYPESENSE_COLLECTION)
+        # Check if lexicon_terms field is present, if not add it dynamically
+        fields = [f['name'] for f in col.get('fields', [])]
+        if 'lexicon_terms' not in fields:
+            logger.info("Adding 'lexicon_terms' field to Typesense collection '%s'...", config.TYPESENSE_COLLECTION)
+            client.collections[config.TYPESENSE_COLLECTION].update({
+                'fields': [{'name': 'lexicon_terms', 'type': 'string[]', 'optional': True}]
+            })
     except typesense.exceptions.ObjectNotFound:
         logger.info("Creating Typesense collection '%s'...", config.TYPESENSE_COLLECTION)
         client.collections.create(schema)
@@ -72,7 +80,8 @@ def execute_hybrid_search(
     search_query = {
         'collection': config.TYPESENSE_COLLECTION,
         'q': query_text if query_text.strip() else '*',
-        'query_by': 'question,answer',
+        'query_by': 'question,answer,lexicon_terms',
+        'query_by_weights': '4,2,3',
         'vector_query': vector_str,
         'per_page': top_k,
     }

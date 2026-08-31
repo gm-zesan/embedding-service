@@ -95,6 +95,7 @@ class SyncFAQRequest(BaseModel):
     answer: str
     priority: int = 0
     is_active: bool = True
+    lexicon_terms: List[str] = []
 
 
 class SyncFAQResponse(BaseModel):

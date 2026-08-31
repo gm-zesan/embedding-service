@@ -16,10 +16,11 @@ def preprocess_query(query: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Tier 2: Local Deterministic Domain & Synonym Normalizer (0 ms, offline)
+# Tier 2: Concept-Driven Local Domain Lexicon (0 ms, offline deterministic)
+# Extracted directly from the verified 26 FAQ Knowledge Base inventory
 # ---------------------------------------------------------------------------
-LOCAL_DOMAIN_SYNONYMS = {
-    # 1. Account & Registration
+LOCAL_DOMAIN_LEXICON = {
+    # ── Concept 1: Accounts, Onboarding & Authentication ─────────────────────
     "notun akaunt": "create account register sign up",
     "akaunt khulbo": "create account register",
     "account khulbo": "create account register",
@@ -28,47 +29,104 @@ LOCAL_DOMAIN_SYNONYMS = {
     "একাউন্ট খুলব": "create account register",
     "একাউন্ট তৈরি": "create account register",
     "কীভাবে একাউন্ট": "create account register",
-    # 2. Login, Auth & 2FA
     "login korbo": "login sign in access account",
     "dhukbo": "login sign in",
     "লগইন": "login sign in",
-    "পাসওয়ার্ড ভুলে": "forgot reset password",
-    "password vule": "forgot reset password",
-    "2 step": "two factor authentication 2fa enable security",
-    "2-step": "two factor authentication 2fa enable security",
-    "2fa": "two factor authentication enable security",
-    "two factor": "two factor authentication 2fa enable security",
-    # 3. Invoices, Receipts & Statements
-    "purono bill": "view invoices receipt history",
-    "purono invoice": "view invoices receipt history",
-    "আগের ইনভয়েস": "view invoices receipt history",
-    "রসিদ দেখতে": "view invoices receipt history",
-    "tax invoice": "view invoices receipt download",
-    "download invoice": "view invoices receipt download",
-    # 4. Payment Method & Cards
-    "card change": "update payment method credit card",
-    "notun card": "update payment method credit card",
-    "কার্ড পরিবর্তন": "update payment method credit card",
-    "পেমেন্ট মেথড": "update payment method credit card",
-    "credit card update": "update payment method credit card",
-    # 5. Refunds, Money Back & Reversals
-    "taka ferot": "refund payment reversal money back policy",
-    "money back": "refund payment reversal policy",
-    "payment reversal": "refund payment reversal policy",
-    "টাকা ফেরত": "refund payment reversal money back policy",
-    # 6. Subscription Plans & Upgrades
-    "plan change": "change subscription plan upgrade",
-    "plan switch": "change subscription plan upgrade",
-    "প্ল্যান পরিবর্তন": "change subscription plan upgrade",
-    "upgrade plan": "change subscription plan upgrade monthly to annual",
-    "annual billing": "change subscription plan upgrade monthly to annual",
-    # 7. Multi-channel & Platform Integrations
-    "duto eksathe": "connect multiple channels simultaneously",
-    "ekshathe": "multiple channels simultaneously",
-    "একই সাথে": "multiple channels simultaneously",
-    "একসাথে": "multiple channels simultaneously",
-    "whatsapp connect": "connect link whatsapp business channel",
-    "telegram connect": "connect link telegram bot channel",
+    "পাসওয়ার্ড ভুলে": "forgot reset password create account",
+    "password vule": "forgot reset password create account",
+    "reset password": "forgot reset password create account",
+    "first time login": "what do I do after logging in workspace profile onboarding",
+    "prothom login": "what do I do after logging in workspace profile onboarding",
+
+    # ── Concept 2: Two-Factor Authentication & Access Security ───────────────
+    "2 step": "two factor authentication 2fa enable security authenticator app",
+    "2-step": "two factor authentication 2fa enable security authenticator app",
+    "2fa": "two factor authentication 2fa enable security authenticator app",
+    "two factor": "two factor authentication 2fa enable security authenticator app",
+    "authenticator code": "two factor authentication 2fa enable security authenticator app",
+    "authenticator app": "two factor authentication 2fa enable security",
+    "security code": "two factor authentication 2fa enable security",
+    "টু-স্টেপ": "two factor authentication 2fa enable security authenticator app",
+    "টু স্টেপ": "two factor authentication 2fa enable security authenticator app",
+    "ভেরিফিকেশন": "two factor authentication 2fa enable security authenticator app",
+
+    # ── Concept 3: Data Security, Encryption & Privacy Compliance ───────────
+    "unreadable to unauthorized": "how is my data encrypted AES-256 TLS security data protection",
+    "customer records unreadable": "how is my data encrypted AES-256 TLS security data protection",
+    "data encrypted": "how is my data encrypted AES-256 TLS security data protection",
+    "data security": "how is my data encrypted AES-256 TLS security data protection",
+    "ডেটা এনক্রিপশন": "how is my data encrypted AES-256 TLS security data protection",
+    "এনক্রিপ্ট": "how is my data encrypted AES-256 TLS security data protection",
+    "এনক্রিপশন": "how is my data encrypted AES-256 TLS security data protection",
+    "gdpr": "does platform comply with GDPR privacy compliance data processing",
+    "privacy regulation": "does platform comply with GDPR privacy compliance data processing",
+
+    # ── Concept 4: Invoices, Receipts, Audits & Statements ────────────────────
+    "purono bill": "view invoices receipt history download",
+    "purono invoice": "view invoices receipt history download",
+    "আগের ইনভয়েস": "view invoices receipt history download",
+    "আগের ইনভয়েস": "view invoices receipt history download",
+    "ইনভয়েস": "view invoices receipt history download",
+    "ইনভয়েস": "view invoices receipt history download",
+    "রসিদ": "view invoices receipt history download",
+    "রসিদ দেখতে": "view invoices receipt history download",
+    "tax invoice": "view invoices receipt history download",
+    "download invoice": "view invoices receipt history download",
+    "tax documentation": "view invoices receipt history download corporate expenses",
+    "tax receipts": "view invoices receipt history download corporate expenses",
+    "auditors inspect": "view invoices receipt history download corporate expenses",
+    "billing history": "view invoices receipt history download",
+
+    # ── Concept 5: Payment Methods, Cards & Refunds ──────────────────────────
+    "card change": "update payment method credit card paypal billing",
+    "notun card": "update payment method credit card paypal billing",
+    "কার্ড পরিবর্তন": "update payment method credit card paypal billing",
+    "পেমেন্ট মেথড": "update payment method credit card paypal billing",
+    "credit card update": "update payment method credit card paypal billing",
+    "expired mastercard": "update payment method credit card paypal billing",
+    "swap out my expired": "update payment method credit card paypal billing",
+    "corporate credit card": "update payment method credit card paypal billing",
+    "taka ferot": "refund payment reversal money back policy update payment method",
+    "money back": "refund payment reversal policy update payment method",
+    "payment reversal": "refund payment reversal policy update payment method",
+    "টাকা ফেরত": "refund payment reversal money back policy update payment method",
+
+    # ── Concept 6: Subscription Plans, Upgrades & Discounts ──────────────────
+    "plan change": "change my plan subscription upgrade downgrade",
+    "plan switch": "change my plan subscription upgrade downgrade",
+    "প্ল্যান পরিবর্তন": "change my plan subscription upgrade downgrade",
+    "upgrade plan": "change my plan subscription upgrade monthly to annual prepaid",
+    "annual billing": "change my plan subscription upgrade monthly to annual prepaid",
+    "annual prepaid": "change my plan subscription upgrade monthly to annual prepaid",
+    "terminate membership": "change my plan cancel subscription downgrade",
+    "switch from monthly": "change my plan subscription upgrade monthly to annual",
+    "charity foundation": "do you offer discounts for non-profits verified 50% discount",
+    "non-profit": "do you offer discounts for non-profits verified 50% discount",
+    "free trial": "is there a free trial 14-day pro plan no credit card",
+    "test without paying": "is there a free trial 14-day pro plan no credit card",
+
+    # ── Concept 7: Channels, Platforms & Multi-Channel Integrations ───────────
+    "duto eksathe": "can I use multiple channels simultaneously connect whatsapp telegram",
+    "ekshathe": "can I use multiple channels simultaneously connect whatsapp telegram",
+    "একই সাথে": "can I use multiple channels simultaneously connect whatsapp telegram",
+    "একসাথে": "can I use multiple channels simultaneously connect whatsapp telegram",
+    "multiple channels": "can I use multiple channels simultaneously connect whatsapp telegram",
+    "whatsapp connect": "how do I connect WhatsApp QR code integration",
+    "whatsapp business cloud api": "how do I connect WhatsApp QR code integration",
+    "telegram connect": "how do I connect Telegram bot authorization",
+
+    # ── Concept 8: Agent Troubleshooting & Message Delivery ──────────────────
+    "chatbot not responding": "why is my chatbot not responding active service",
+    "bot silent": "why is my chatbot not responding active service",
+    "agent is sitting idle": "why is my chatbot not responding active service",
+    "unresponsive": "why is my chatbot not responding active service",
+    "messages not being delivered": "why are my messages not being delivered network recipient restrictions",
+    "encounter an error": "what should I do if I encounter an error screenshot refresh",
+
+    # ── Concept 9: API & Developer Authentication ────────────────────────────
+    "api key": "how do I get my API key generate manage keys",
+    "rate limits": "what are the API rate limits requests per minute",
+    "authenticate api": "how do I authenticate API requests bearer token authorization header",
 }
 
 
@@ -76,7 +134,7 @@ def expand_locally(clean_query: str) -> str:
     """Instant deterministic local domain expansion (0 ms, offline)."""
     q_lower = clean_query.lower()
     expansions = []
-    for pattern, syns in LOCAL_DOMAIN_SYNONYMS.items():
+    for pattern, syns in LOCAL_DOMAIN_LEXICON.items():
         if pattern in q_lower:
             expansions.append(syns)
     if expansions:

@@ -270,6 +270,7 @@ def sync_faq(request: SyncFAQRequest):
         "priority": int(request.priority),
         "is_active": bool(request.is_active),
         "embedding": vector,
+        "lexicon_terms": [t.strip() for t in request.lexicon_terms if t.strip()],
     }
 
     client = get_typesense_client()
