@@ -127,6 +127,74 @@ LOCAL_DOMAIN_LEXICON = {
     "api key": "how do I get my API key generate manage keys",
     "rate limits": "what are the API rate limits requests per minute",
     "authenticate api": "how do I authenticate API requests bearer token authorization header",
+
+    # ── Retail Concept 1: Returns & Eligibility ──────────────────────────────
+    "return korar rules": "return policy eligibility unworn tags intact 7 days",
+    "ferot pathabo": "return policy eligibility unworn tags intact 7 days send back",
+    "jama ferot": "return policy eligibility unworn tags 7 days",
+    "product ferot": "return policy eligibility unworn tags intact 7 days",
+    "retrn": "return policy eligibility unworn tags intact 7 days",
+    "পণ্য ফেরত": "return policy eligibility unworn tags intact 7 days",
+    "জামা ফেরত": "return policy eligibility unworn tags intact 7 days",
+    "রিটার্ন নীতি": "return policy eligibility unworn tags intact 7 days",
+
+    # ── Retail Concept 2: Refunds & Processing Time ───────────────────────────
+    "refund pete koto din": "refund policy processing time 7 to 10 days bKash gateway",
+    "taka ferot": "refund policy processing time 7 to 10 days bKash card",
+    "taka refund": "refund policy processing time 7 to 10 days bKash card",
+    "টাকা ফেরত": "refund policy processing time 7 to 10 days bKash card",
+    "রিফান্ড": "refund policy processing time 7 to 10 days bKash card",
+    "rfnd": "refund policy processing time 7 to 10 days",
+    "reversal": "refund policy turnaround 72 hours prepaid",
+
+    # ── Retail Concept 3: Sizing & Exchanges ─────────────────────────────────
+    "exchange": "product exchange policy size color swap replacement 5 days",
+    "সাইজ বদলানো": "product exchange policy size color swap replacement 5 days",
+    "এক্সচেঞ্জ": "product exchange policy size color swap replacement 5 days",
+    "size na mille": "product exchange policy size color swap replacement 5 days",
+    "choto hoise": "product exchange policy size color swap replacement 5 days",
+    "boro hoise": "product exchange policy size color swap replacement 5 days",
+    "l size er poriborte": "product exchange policy size color swap replacement 5 days",
+    "swap": "product exchange policy size color swap replacement 5 days",
+
+    # ── Retail Concept 4: Delivery, Shipping & Tracking ──────────────────────
+    "delivery charge": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
+    "delivry": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
+    "ডেলিভারি চার্জ": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
+    "ডেলিভারি খরচ": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
+    "shipping rate": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
+    "same day delivery": "express same day delivery inside Dhaka 150 BDT",
+    "koto din lagbe": "delivery timeframes 24 to 48 hours Dhaka 3 to 5 days outside",
+    "ডেলিভারি সময়": "delivery timeframes 24 to 48 hours Dhaka 3 to 5 days outside",
+
+    # ── Retail Concept 5: Payment & COD ──────────────────────────────────────
+    "cash on delivery": "payment methods Cash on Delivery COD bKash Nagad card SSLCommerz",
+    "cod": "payment methods Cash on Delivery COD bKash Nagad card SSLCommerz",
+    "ক্যাশ অন ডেলিভারি": "payment methods Cash on Delivery COD bKash Nagad card SSLCommerz",
+    "bkash payment": "payment methods bKash merchant gateway Nagad Rocket SSLCommerz",
+    "bikash": "payment methods bKash merchant gateway Nagad Rocket SSLCommerz",
+    "bks": "payment methods bKash merchant gateway Nagad Rocket SSLCommerz",
+    "পেমেন্ট মাধ্যম": "payment methods bKash Nagad card COD",
+
+    # ── Retail Concept 6: Order Cancellation ─────────────────────────────────
+    "order cancel": "order cancellation policy before dispatch central warehouse",
+    "ক্যানসেল": "order cancellation policy before dispatch central warehouse",
+    "বাতিল": "order cancellation policy before dispatch central warehouse",
+
+    # ── Retail Concept 7: Office, Outlets & Showroom ─────────────────────────
+    "showroom": "contact store address Banani Road 11 Block D Dhaka flagship store",
+    "thikana": "contact store address Banani Road 11 Block D Dhaka flagship store",
+    "ঠিকানা": "contact store address Banani Road 11 Block D Dhaka flagship store",
+    "শোরুম": "contact store address Banani Road 11 Block D Dhaka flagship store",
+    "office": "contact store address Banani Road 11 Block D Dhaka flagship store",
+    "দোকান": "contact store address Banani Road 11 Block D Dhaka flagship store",
+
+    # ── Retail Concept 8: Warranty & Defect Guarantee ────────────────────────
+    "warranty": "product warranty 6 month 1 year electronics 30 day apparel defect",
+    "ওয়ারেন্টি": "product warranty 6 month 1 year electronics 30 day apparel defect",
+    "গ্যারান্টি": "product warranty 6 month 1 year electronics 30 day apparel defect",
+    "selai khule": "product warranty 30 day manufacturing defect stitching zipper",
+    "venge gele": "product warranty manufacturing defect guarantee",
 }
 
 
