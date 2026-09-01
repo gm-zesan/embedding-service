@@ -389,7 +389,7 @@ def rerank_candidate_hits(query: str, raw_hits: List[Dict[str, Any]]) -> tuple[L
             "target_doc_types": ["return_policy"],
         },
         "delivery_policy": {
-            "cues": ["ডেলিভারি চার্জ", "ডেলিভারি সময়", "কুরিয়ার চার্জ", "শিপিং", "সেইম ডে ডেলিভারি", "ঢাকায় ডেলিভারি", "সারাদেশে ডেলিভারি", "delivery charge", "shipping fee"],
+            "cues": ["ডেলিভারি চার্জ", "ডেলিভারি সময়", "কুরিয়ার চার্জ", "শিপিং", "সেইম ডে ডেলিভারি", "ঢাকায় ডেলিভারি", "সারাদেশে ডেলিভারি", "পার্সেল ট্র্যাকিং", "ট্র্যাকিং কোড", "ডেলিভারি হতে কত দিন", "delivery charge", "shipping fee"],
             "target_doc_types": ["delivery_policy"],
         },
         "payment_policy": {
