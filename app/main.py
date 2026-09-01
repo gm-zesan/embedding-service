@@ -269,6 +269,7 @@ def sync_faq(request: SyncFAQRequest):
         "answer": request.answer.strip(),
         "priority": int(request.priority),
         "is_active": bool(request.is_active),
+        "document_type": str(request.document_type or "faq"),
         "embedding": vector,
         "lexicon_terms": [t.strip() for t in request.lexicon_terms if t.strip()],
     }

@@ -32,6 +32,7 @@ def ensure_faq_collection(client: typesense.Client) -> None:
             {'name': 'is_active', 'type': 'bool'},
             {'name': 'embedding', 'type': 'float[]', 'num_dim': 768},
             {'name': 'lexicon_terms', 'type': 'string[]', 'optional': True},
+            {'name': 'document_type', 'type': 'string', 'optional': True, 'facet': True},
         ],
         'default_sorting_field': 'priority',
     }
@@ -39,13 +40,16 @@ def ensure_faq_collection(client: typesense.Client) -> None:
     try:
         col = client.collections[config.TYPESENSE_COLLECTION].retrieve()
         logger.info("Typesense collection '%s' already exists.", config.TYPESENSE_COLLECTION)
-        # Check if lexicon_terms field is present, if not add it dynamically
         fields = [f['name'] for f in col.get('fields', [])]
+        update_fields = []
         if 'lexicon_terms' not in fields:
             logger.info("Adding 'lexicon_terms' field to Typesense collection '%s'...", config.TYPESENSE_COLLECTION)
-            client.collections[config.TYPESENSE_COLLECTION].update({
-                'fields': [{'name': 'lexicon_terms', 'type': 'string[]', 'optional': True}]
-            })
+            update_fields.append({'name': 'lexicon_terms', 'type': 'string[]', 'optional': True})
+        if 'document_type' not in fields:
+            logger.info("Adding 'document_type' field to Typesense collection '%s'...", config.TYPESENSE_COLLECTION)
+            update_fields.append({'name': 'document_type', 'type': 'string', 'optional': True, 'facet': True})
+        if update_fields:
+            client.collections[config.TYPESENSE_COLLECTION].update({'fields': update_fields})
     except typesense.exceptions.ObjectNotFound:
         logger.info("Creating Typesense collection '%s'...", config.TYPESENSE_COLLECTION)
         client.collections.create(schema)

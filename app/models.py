@@ -93,6 +93,7 @@ class SyncFAQRequest(BaseModel):
     workspace_id: int
     question: str
     answer: str
+    document_type: str = "faq"
     priority: int = 0
     is_active: bool = True
     lexicon_terms: List[str] = []

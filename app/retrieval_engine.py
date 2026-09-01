@@ -214,6 +214,7 @@ def parse_typesense_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "id": str(doc.get("id")),
             "question": doc.get("question", ""),
             "answer": doc.get("answer", ""),
+            "document_type": doc.get("document_type", "faq"),
             "priority": doc.get("priority", 0),
             "score": final_score,
             "match_type": match_type,
