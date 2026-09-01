@@ -37,9 +37,16 @@ TYPESENSE_COLLECTION = os.getenv("TYPESENSE_COLLECTION", "faqs")
 
 # -- Retrieval & Adaptive Expansion --
 RETRIEVAL_EXPANSION_THRESHOLD = float(os.getenv("RETRIEVAL_EXPANSION_THRESHOLD", "0.65"))
-LLM_EXPANSION_API_KEY = os.getenv("LLM_EXPANSION_API_KEY", "")
-LLM_EXPANSION_BASE_URL = os.getenv("LLM_EXPANSION_BASE_URL", "https://api.deepseek.com/v1")
-LLM_EXPANSION_MODEL = os.getenv("LLM_EXPANSION_MODEL", "deepseek-chat")
+RETRIEVAL_LLM_PROVIDER = os.getenv("RETRIEVAL_LLM_PROVIDER", "deepseek")
+RETRIEVAL_LLM_FALLBACK_PROVIDER = os.getenv("RETRIEVAL_LLM_FALLBACK_PROVIDER", "openrouter")
+RETRIEVAL_LLM_API_KEY = os.getenv("RETRIEVAL_LLM_API_KEY", os.getenv("LLM_EXPANSION_API_KEY", ""))
+RETRIEVAL_LLM_BASE_URL = os.getenv("RETRIEVAL_LLM_BASE_URL", os.getenv("LLM_EXPANSION_BASE_URL", "https://api.deepseek.com/v1"))
+RETRIEVAL_LLM_MODEL = os.getenv("RETRIEVAL_LLM_MODEL", os.getenv("LLM_EXPANSION_MODEL", "deepseek-chat"))
+
+# Backward compatibility aliases
+LLM_EXPANSION_API_KEY = RETRIEVAL_LLM_API_KEY
+LLM_EXPANSION_BASE_URL = RETRIEVAL_LLM_BASE_URL
+LLM_EXPANSION_MODEL = RETRIEVAL_LLM_MODEL
 
 # -- Post-Retrieval Candidate Reranker --
 RERANKER_ENABLED = os.getenv("RERANKER_ENABLED", "true").lower() in ("true", "1")

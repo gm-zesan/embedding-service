@@ -5,6 +5,7 @@ import httpx
 from typing import Any, Dict, List, Optional
 from app import config
 from app.embedding import embed
+from app.llm import LLMRequest, default_client as llm_client
 from app.typesense_engine import execute_hybrid_search, get_typesense_client
 
 logger = logging.getLogger("retrieval_engine")
@@ -232,37 +233,22 @@ async def expand_query_via_llm(query: str) -> Optional[str]:
         "Do NOT answer the question. Return ONLY comma-separated search terms."
     )
 
-    headers = {
-        "Authorization": f"Bearer {config.LLM_EXPANSION_API_KEY}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:8001",
-        "X-Title": "Chatbot Retrieval Escape Hatch",
-    }
-
-    payload = {
-        "model": config.LLM_EXPANSION_MODEL,
-        "messages": [
+    req = LLMRequest(
+        messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": query},
         ],
-        "temperature": 0.1,
-        "max_tokens": 40,
-    }
-
-    url = f"{config.LLM_EXPANSION_BASE_URL.rstrip('/')}/chat/completions"
+        temperature=0.1,
+        max_tokens=40,
+    )
 
     try:
-        timeout_cfg = httpx.Timeout(1.5, connect=0.8)
-        async with httpx.AsyncClient(timeout=timeout_cfg) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                expanded = data["choices"][0]["message"]["content"].strip()
-                logger.info("Tier 3 LLM Expansion: '%s' -> '%s'", query, expanded)
-                return expanded
-            else:
-                logger.warning("Tier 3 LLM expansion failed HTTP %s: %s", resp.status_code, resp.text)
-                return None
+        resp = await llm_client.generate(req)
+        if resp.content:
+            expanded = resp.content.strip()
+            logger.info("Tier 3 LLM Expansion (%s/%s): '%s' -> '%s'", resp.provider, resp.model, query, expanded)
+            return expanded
+        return None
     except Exception as e:
         logger.warning("Tier 3 LLM query expansion exception (bypassed safely): %s", e)
         return None
