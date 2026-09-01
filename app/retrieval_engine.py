@@ -66,9 +66,8 @@ LOCAL_DOMAIN_LEXICON = {
     "purono invoice": "view invoices receipt history download",
     "আগের ইনভয়েস": "view invoices receipt history download",
     "আগের ইনভয়েস": "view invoices receipt history download",
-    "ইনভয়েস": "view invoices receipt history download",
-    "ইনভয়েস": "view invoices receipt history download",
-    "রসিদ": "view invoices receipt history download",
+    "ইনভয়েস ডাউনলোড": "view invoices receipt history download",
+    "ইনভয়েস ডাউনলোড": "view invoices receipt history download",
     "রসিদ দেখতে": "view invoices receipt history download",
     "tax invoice": "view invoices receipt history download",
     "download invoice": "view invoices receipt history download",
@@ -76,6 +75,15 @@ LOCAL_DOMAIN_LEXICON = {
     "tax receipts": "view invoices receipt history download corporate expenses",
     "auditors inspect": "view invoices receipt history download corporate expenses",
     "billing history": "view invoices receipt history download",
+
+    # ── Retail Commerce Concepts: Warranty, Claims & Tracking ─────────────
+    "ক্লেইম": "warranty quality guarantee proof of purchase replacement claim",
+    "ওয়ারেন্টি": "product warranty quality guarantee brand service warranty",
+    "ওয়ারেন্টি": "product warranty quality guarantee brand service warranty",
+    "সেলাই ছুটে": "product warranty apparel 30 day manufacturing defect guarantee stitching",
+    "পার্সেল ট্র্যাক": "delivery shipping tracking live courier sms tracking code",
+    "কুরিয়ার ট্র্যাকিং": "delivery shipping tracking live courier sms tracking code",
+    "পেমেন্ট গ্রহণ": "accepted payment methods bkash nagad cod cash on delivery",
 
     # ── Concept 5: Payment Methods, Cards & Refunds ──────────────────────────
     "card change": "update payment method credit card paypal billing",
@@ -300,7 +308,7 @@ def parse_typesense_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 ACTION_INTENT_MAP = {
     "invoice": {
-        "actions": ["view", "download", "receipt", "history", "see", "find", "আগের", "রসিদ", "ইনভয়েস", "দেখতে", "পাবো", "purono", "kothay", "pabo"],
+        "actions": ["view", "download", "receipt", "history", "see", "find", "purono", "kothay", "pabo"],
         "target_phrase": "how do i view my invoices?",
         "penalty_phrase": "how do i update my payment method?"
     },
@@ -371,6 +379,60 @@ def rerank_candidate_hits(query: str, raw_hits: List[Dict[str, Any]]) -> tuple[L
                         applied = True
                         reasons.append(f"action_align_{intent_name}")
                         break
+
+    hits.sort(key=lambda x: (x["score"], x.get("priority", 0)), reverse=True)
+
+    # 3. Direct Commerce Policy Intent Alignment on close delta
+    POLICY_INTENT_MAP = {
+        "return_policy": {
+            "cues": ["রিটার্ন", "পণ্য ফেরত", "ফেরত দিতে", "ফেরত দেওয়া", "নন-রিটার্নেবল", "return policy", "can i return", "return product"],
+            "target_doc_types": ["return_policy"],
+        },
+        "delivery_policy": {
+            "cues": ["ডেলিভারি চার্জ", "ডেলিভারি সময়", "কুরিয়ার চার্জ", "শিপিং", "সেইম ডে ডেলিভারি", "ঢাকায় ডেলিভারি", "সারাদেশে ডেলিভারি", "delivery charge", "shipping fee"],
+            "target_doc_types": ["delivery_policy"],
+        },
+        "payment_policy": {
+            "cues": ["পেমেন্ট", "বিকাশ", "নগদ", "ক্যাশ অন ডেলিভারি", "payment method", "cod"],
+            "target_doc_types": ["payment_policy"],
+        },
+        "warranty_policy": {
+            "cues": ["ওয়ারেন্টি", "গ্যারান্টি", "সেলাই ছুটে", "বোতাম ভাঙা", "নষ্ট কাপড়", "সার্ভিসিং", "ইনভয়েস", "ইনভয়েস", "ক্লেইম", "warranty", "guarantee"],
+            "target_doc_types": ["warranty_policy"],
+        },
+        "privacy_policy": {
+            "cues": ["গোপনীয়তা", "তথ্য সুরক্ষা", "থার্ড পার্টি", "ডাটা সুরক্ষা", "privacy policy", "third party"],
+            "target_doc_types": ["privacy_policy"],
+        },
+        "exchange_policy": {
+            "cues": ["সাইজ বদলানো", "কালার বদলানো", "এক্সচেঞ্জ", "সাইজ পরিবর্তন", "exchange policy"],
+            "target_doc_types": ["exchange_policy"],
+        },
+        "customer_support": {
+            "cues": ["কাস্টমার কেয়ার", "কাস্টমার কেয়ার", "হেল্পলাইন", "খোলা থাকে", "যোগাযোগ", "customer support", "helpline"],
+            "target_doc_types": ["customer_support", "contact"],
+        },
+        "cancellation_policy": {
+            "cues": ["অর্ডার বাতিল", "বাতিল করার নিয়ম", "cancel order"],
+            "target_doc_types": ["cancellation_policy"],
+        },
+    }
+
+    top1 = hits[0]
+    for i in range(1, min(3, len(hits))):
+        cand = hits[i]
+        delta = round(top1["score"] - cand["score"], 4)
+        if 0.0 < delta <= 0.15:
+            cand_type = cand.get("document_type", "faq")
+            top1_type = top1.get("document_type", "faq")
+            if cand_type != top1_type:
+                for pol_name, pol_data in POLICY_INTENT_MAP.items():
+                    if any(cue in q_lower for cue in pol_data["cues"]):
+                        if cand_type in pol_data["target_doc_types"] and top1_type not in pol_data["target_doc_types"]:
+                            cand["score"] = round(top1["score"] + 0.02, 4)
+                            applied = True
+                            reasons.append(f"policy_align_{pol_name}")
+                            break
 
     hits.sort(key=lambda x: (x["score"], x.get("priority", 0)), reverse=True)
     reason_str = ", ".join(reasons) if applied else None
