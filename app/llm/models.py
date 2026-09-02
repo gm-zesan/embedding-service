@@ -19,3 +19,4 @@ class LLMResponse:
     usage: Dict[str, int] = field(default_factory=dict)
     finish_reason: Optional[str] = None
     raw_response: Dict[str, Any] = field(default_factory=dict)
+    telemetry: Dict[str, Any] = field(default_factory=dict)
