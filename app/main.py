@@ -246,6 +246,7 @@ async def search_faqs(request: SearchRequest, req: Request):
         workspace_id=request.workspace_id,
         top_k=request.top_k,
         request_id=request_id,
+        contextual_signal=request.contextual_signal,
     )
 
 
