@@ -205,15 +205,27 @@ LOCAL_DOMAIN_LEXICON = {
     "গ্যারান্টি": "product warranty 6 month 1 year electronics 30 day apparel defect",
     "selai khule": "product warranty 30 day manufacturing defect stitching zipper",
     "venge gele": "product warranty manufacturing defect guarantee",
+
+    # ── Retail Concept 9: Bangla Scoped Morphology & Local Variations ────────
+    "সেইম ডে": "express same day delivery inside Dhaka 150 BDT",
+    "ডেলিভারি ফি": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
+    "ডেলিভারির ফি": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
+    "নন-রিটার্নেবল": "official return policy non-returnable items",
+    "সার্ভিস চার্জ": "product warranty 6 month 1 year electronics 30 day apparel defect",
+    "কাস্টমার কেয়ার": "customer support hours 9am 10pm helpline",
+    "কাস্টমার কেয়ার": "customer support hours 9am 10pm helpline",
+    "পিন বা পাসওয়ার্ড": "social media verification official messenger rules",
+    "পিন বা পাসওয়ার্ড": "social media verification official messenger rules",
 }
 
 
-def expand_locally(clean_query: str) -> str:
+def expand_locally(clean_query: str, normalized_signal: Optional[str] = None) -> str:
     """Instant deterministic local domain expansion (0 ms, offline)."""
     q_lower = clean_query.lower()
+    norm_lower = normalized_signal.lower() if normalized_signal else ""
     expansions = []
     for pattern, syns in LOCAL_DOMAIN_LEXICON.items():
-        if pattern in q_lower:
+        if pattern in q_lower or (norm_lower and pattern in norm_lower):
             expansions.append(syns)
     if expansions:
         return clean_query + " " + " ".join(expansions)
@@ -499,7 +511,8 @@ async def search_knowledge_base(
     # ── Tier 2: Deterministic Domain & Synonym Expansion ───────────────────────
     # If raw query score is moderate/low (< 0.55), apply local domain synonyms (0ms latency penalty)
     if first_pass_top_score < 0.55:
-        local_expanded = expand_locally(clean_query)
+        norm_sig = enrichment.metadata.get("normalized_signal")
+        local_expanded = expand_locally(clean_query, normalized_signal=norm_sig)
         if local_expanded != clean_query:
             tier_executed = "tier2_local_deterministic"
             expansion_applied = True
