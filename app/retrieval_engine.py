@@ -21,229 +21,61 @@ def preprocess_query(query: str) -> str:
 # Tier 2: Concept-Driven Local Domain Lexicon (0 ms, offline deterministic)
 # Extracted directly from the verified 26 FAQ Knowledge Base inventory
 # ---------------------------------------------------------------------------
-LOCAL_DOMAIN_LEXICON = {
-    # ── Concept 1: Accounts, Onboarding & Authentication ─────────────────────
-    "notun akaunt": "create account register sign up",
-    "akaunt khulbo": "create account register",
-    "account khulbo": "create account register",
-    "notun account": "create account register sign up",
-    "নতুন একাউন্ট": "create account register sign up",
-    "একাউন্ট খুলব": "create account register",
-    "একাউন্ট তৈরি": "create account register",
-    "কীভাবে একাউন্ট": "create account register",
-    "login korbo": "login sign in access account",
-    "dhukbo": "login sign in",
-    "লগইন": "login sign in",
-    "পাসওয়ার্ড ভুলে": "forgot reset password create account",
-    "password vule": "forgot reset password create account",
-    "reset password": "forgot reset password create account",
-    "first time login": "what do I do after logging in workspace profile onboarding",
-    "prothom login": "what do I do after logging in workspace profile onboarding",
 
-    # ── Concept 2: Two-Factor Authentication & Access Security ───────────────
-    "2 step": "two factor authentication 2fa enable security authenticator app",
-    "2-step": "two factor authentication 2fa enable security authenticator app",
-    "2fa": "two factor authentication 2fa enable security authenticator app",
-    "two factor": "two factor authentication 2fa enable security authenticator app",
-    "authenticator code": "two factor authentication 2fa enable security authenticator app",
-    "authenticator app": "two factor authentication 2fa enable security",
-    "security code": "two factor authentication 2fa enable security",
-    "টু-স্টেপ": "two factor authentication 2fa enable security authenticator app",
-    "টু স্টেপ": "two factor authentication 2fa enable security authenticator app",
-    "ভেরিফিকেশন": "two factor authentication 2fa enable security authenticator app",
 
-    # ── Concept 3: Data Security, Encryption & Privacy Compliance ───────────
-    "unreadable to unauthorized": "how is my data encrypted AES-256 TLS security data protection",
-    "customer records unreadable": "how is my data encrypted AES-256 TLS security data protection",
-    "data encrypted": "how is my data encrypted AES-256 TLS security data protection",
-    "data security": "how is my data encrypted AES-256 TLS security data protection",
-    "ডেটা এনক্রিপশন": "how is my data encrypted AES-256 TLS security data protection",
-    "এনক্রিপ্ট": "how is my data encrypted AES-256 TLS security data protection",
-    "এনক্রিপশন": "how is my data encrypted AES-256 TLS security data protection",
-    "gdpr": "does platform comply with GDPR privacy compliance data processing",
-    "privacy regulation": "does platform comply with GDPR privacy compliance data processing",
-
-    # ── Concept 4: Invoices, Receipts, Audits & Statements ────────────────────
-    "purono bill": "view invoices receipt history download",
-    "purono invoice": "view invoices receipt history download",
-    "আগের ইনভয়েস": "view invoices receipt history download",
-    "আগের ইনভয়েস": "view invoices receipt history download",
-    "ইনভয়েস ডাউনলোড": "view invoices receipt history download",
-    "ইনভয়েস ডাউনলোড": "view invoices receipt history download",
-    "রসিদ দেখতে": "view invoices receipt history download",
-    "tax invoice": "view invoices receipt history download",
-    "download invoice": "view invoices receipt history download",
-    "tax documentation": "view invoices receipt history download corporate expenses",
-    "tax receipts": "view invoices receipt history download corporate expenses",
-    "auditors inspect": "view invoices receipt history download corporate expenses",
-    "billing history": "view invoices receipt history download",
-
-    # ── Retail Commerce Concepts: Warranty, Claims & Tracking ─────────────
-    "ক্লেইম": "warranty quality guarantee proof of purchase replacement claim",
-    "ওয়ারেন্টি": "product warranty quality guarantee brand service warranty",
-    "ওয়ারেন্টি": "product warranty quality guarantee brand service warranty",
-    "সেলাই ছুটে": "product warranty apparel 30 day manufacturing defect guarantee stitching",
-    "পার্সেল ট্র্যাক": "delivery shipping tracking live courier sms tracking code",
-    "কুরিয়ার ট্র্যাকিং": "delivery shipping tracking live courier sms tracking code",
-    "পেমেন্ট গ্রহণ": "accepted payment methods bkash nagad cod cash on delivery",
-
-    # ── Concept 5: Payment Methods, Cards & Refunds ──────────────────────────
-    "card change": "update payment method credit card paypal billing",
-    "notun card": "update payment method credit card paypal billing",
-    "কার্ড পরিবর্তন": "update payment method credit card paypal billing",
-    "পেমেন্ট মেথড": "update payment method credit card paypal billing",
-    "credit card update": "update payment method credit card paypal billing",
-    "expired mastercard": "update payment method credit card paypal billing",
-    "swap out my expired": "update payment method credit card paypal billing",
-    "corporate credit card": "update payment method credit card paypal billing",
-    "taka ferot": "refund payment reversal money back policy update payment method",
-    "money back": "refund payment reversal policy update payment method",
-    "payment reversal": "refund payment reversal policy update payment method",
-    "টাকা ফেরত": "refund payment reversal money back policy update payment method",
-
-    # ── Concept 6: Subscription Plans, Upgrades & Discounts ──────────────────
-    "plan change": "change my plan subscription upgrade downgrade",
-    "plan switch": "change my plan subscription upgrade downgrade",
-    "প্ল্যান পরিবর্তন": "change my plan subscription upgrade downgrade",
-    "upgrade plan": "change my plan subscription upgrade monthly to annual prepaid",
-    "annual billing": "change my plan subscription upgrade monthly to annual prepaid",
-    "annual prepaid": "change my plan subscription upgrade monthly to annual prepaid",
-    "terminate membership": "change my plan cancel subscription downgrade",
-    "switch from monthly": "change my plan subscription upgrade monthly to annual",
-    "charity foundation": "do you offer discounts for non-profits verified 50% discount",
-    "non-profit": "do you offer discounts for non-profits verified 50% discount",
-    "free trial": "is there a free trial 14-day pro plan no credit card",
-    "test without paying": "is there a free trial 14-day pro plan no credit card",
-
-    # ── Concept 7: Channels, Platforms & Multi-Channel Integrations ───────────
-    "duto eksathe": "can I use multiple channels simultaneously connect whatsapp telegram",
-    "ekshathe": "can I use multiple channels simultaneously connect whatsapp telegram",
-    "একই সাথে": "can I use multiple channels simultaneously connect whatsapp telegram",
-    "একসাথে": "can I use multiple channels simultaneously connect whatsapp telegram",
-    "multiple channels": "can I use multiple channels simultaneously connect whatsapp telegram",
-    "whatsapp connect": "how do I connect WhatsApp QR code integration",
-    "whatsapp business cloud api": "how do I connect WhatsApp QR code integration",
-    "telegram connect": "how do I connect Telegram bot authorization",
-
-    # ── Concept 8: Agent Troubleshooting & Message Delivery ──────────────────
-    "chatbot not responding": "why is my chatbot not responding active service",
-    "bot silent": "why is my chatbot not responding active service",
-    "agent is sitting idle": "why is my chatbot not responding active service",
-    "unresponsive": "why is my chatbot not responding active service",
-    "messages not being delivered": "why are my messages not being delivered network recipient restrictions",
-    "encounter an error": "what should I do if I encounter an error screenshot refresh",
-
-    # ── Concept 9: API & Developer Authentication ────────────────────────────
-    "api key": "how do I get my API key generate manage keys",
-    "rate limits": "what are the API rate limits requests per minute",
-    "authenticate api": "how do I authenticate API requests bearer token authorization header",
-
-    # ── Retail Concept 1: Returns & Eligibility ──────────────────────────────
-    "return policy": "return policy eligibility unworn tags intact 7 days",
-    "return timeframe": "return policy eligibility unworn tags intact 7 days",
-    "official return": "return policy eligibility unworn tags intact 7 days",
-    "return korar rules": "return policy eligibility unworn tags intact 7 days",
-    "ferot pathabo": "return policy eligibility unworn tags intact 7 days send back",
-    "jama ferot": "return policy eligibility unworn tags 7 days",
-    "product ferot": "return policy eligibility unworn tags intact 7 days",
-    "retrn": "return policy eligibility unworn tags intact 7 days",
-    "পণ্য ফেরত": "return policy eligibility unworn tags intact 7 days",
-    "জামা ফেরত": "return policy eligibility unworn tags intact 7 days",
-    "রিটার্ন নীতি": "return policy eligibility unworn tags intact 7 days",
-    "রিটার্ন পলিসি": "return policy eligibility unworn tags intact 7 days",
-    "রিটার্ন": "return policy eligibility unworn tags intact 7 days",
-
-    # ── Retail Concept 2: Refunds & Processing Time ───────────────────────────
-    "refund pete koto din": "refund policy processing time 7 to 10 days bKash gateway",
-    "taka ferot": "refund policy processing time 7 to 10 days bKash card",
-    "taka refund": "refund policy processing time 7 to 10 days bKash card",
-    "টাকা ফেরত": "refund policy processing time 7 to 10 days bKash card",
-    "রিফান্ড": "refund policy processing time 7 to 10 days bKash card",
-    "rfnd": "refund policy processing time 7 to 10 days",
-    "reversal": "refund policy turnaround 72 hours prepaid",
-
-    # ── Retail Concept 3: Sizing & Exchanges ─────────────────────────────────
-    "exchange": "product exchange policy size color swap replacement 5 days",
-    "সাইজ বদলানো": "product exchange policy size color swap replacement 5 days",
-    "এক্সচেঞ্জ": "product exchange policy size color swap replacement 5 days",
-    "size na mille": "product exchange policy size color swap replacement 5 days",
-    "choto hoise": "product exchange policy size color swap replacement 5 days",
-    "boro hoise": "product exchange policy size color swap replacement 5 days",
-    "l size er poriborte": "product exchange policy size color swap replacement 5 days",
-    "swap": "product exchange policy size color swap replacement 5 days",
-
-    # ── Retail Concept 4: Delivery, Shipping & Tracking ──────────────────────
-    "delivery charge": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
-    "delivry": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
-    "ডেলিভারি চার্জ": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
-    "ডেলিভারি খরচ": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
-    "shipping rate": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
-    "same day delivery": "express same day delivery inside Dhaka 150 BDT",
-    "koto din lagbe": "delivery timeframes 24 to 48 hours Dhaka 3 to 5 days outside",
-    "ডেলিভারি সময়": "delivery timeframes 24 to 48 hours Dhaka 3 to 5 days outside",
-
-    # ── Retail Concept 5: Payment & COD ──────────────────────────────────────
-    "cash on delivery": "payment methods Cash on Delivery COD bKash Nagad card SSLCommerz",
-    "cod": "payment methods Cash on Delivery COD bKash Nagad card SSLCommerz",
-    "ক্যাশ অন ডেলিভারি": "payment methods Cash on Delivery COD bKash Nagad card SSLCommerz",
-    "bkash payment": "payment methods bKash merchant gateway Nagad Rocket SSLCommerz",
-    "bikash": "payment methods bKash merchant gateway Nagad Rocket SSLCommerz",
-    "bks": "payment methods bKash merchant gateway Nagad Rocket SSLCommerz",
-    "পেমেন্ট মাধ্যম": "payment methods bKash Nagad card COD",
-
-    # ── Retail Concept 6: Order Cancellation ─────────────────────────────────
-    "order cancel": "order cancellation policy before dispatch central warehouse",
-    "ক্যানসেল": "order cancellation policy before dispatch central warehouse",
-    "বাতিল": "order cancellation policy before dispatch central warehouse",
-
-    # ── Retail Concept 7: Office, Outlets & Showroom ─────────────────────────
-    "showroom": "contact store address Banani Road 11 Block D Dhaka flagship store",
-    "thikana": "contact store address Banani Road 11 Block D Dhaka flagship store",
-    "ঠিকানা": "contact store address Banani Road 11 Block D Dhaka flagship store",
-    "শোরুম": "contact store address Banani Road 11 Block D Dhaka flagship store",
-    "office": "contact store address Banani Road 11 Block D Dhaka flagship store",
-    "দোকান": "contact store address Banani Road 11 Block D Dhaka flagship store",
-
-    # ── Retail Concept 8: Warranty & Defect Guarantee ────────────────────────
-    "warranty": "product warranty 6 month 1 year electronics 30 day apparel defect",
-    "warranty claim": "product warranty 6 month 1 year electronics 30 day apparel defect",
-    "claim": "product warranty 6 month 1 year electronics 30 day apparel defect",
-    "ওয়ারেন্টি": "product warranty 6 month 1 year electronics 30 day apparel defect",
-    "গ্যারান্টি": "product warranty 6 month 1 year electronics 30 day apparel defect",
-    "selai khule": "product warranty 30 day manufacturing defect stitching zipper",
-    "venge gele": "product warranty manufacturing defect guarantee",
-
-    # ── Retail Concept 9: Bangla Scoped Morphology & Local Variations ────────
-    "সেইম ডে": "express same day delivery inside Dhaka 150 BDT",
-    "ডেলিভারি ফি": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
-    "ডেলিভারির ফি": "delivery shipping rates 70 BDT inside Dhaka 130 outside",
-    "নন-রিটার্নেবল": "official return policy non-returnable items",
-    "সার্ভিস চার্জ": "product warranty 6 month 1 year electronics 30 day apparel defect",
-    "কাস্টমার কেয়ার": "customer support hours 9am 10pm helpline",
-    "কাস্টমার কেয়ার": "customer support hours 9am 10pm helpline",
-    "পিন বা পাসওয়ার্ড": "social media verification official messenger rules",
-    "পিন বা পাসওয়ার্ড": "social media verification official messenger rules",
-    "delivery tracking": "delivery timeframes 24 to 48 hours Dhaka 3 to 5 days courier tracking",
-    "delivery timeframe": "delivery timeframes 24 to 48 hours Dhaka 3 to 5 days courier tracking",
-}
+def _compute_expansion(
+    clean_query: str,
+    lexicon_dict: Dict[str, str],
+    normalized_signal: Optional[str] = None,
+    contextual_signal: Optional[str] = None,
+) -> str:
+    """Core domain expansion logic over an arbitrary lexicon dictionary."""
+    q_lower = clean_query.lower()
+    norm_lower = normalized_signal.lower() if normalized_signal else ""
+    ctx_lower = contextual_signal.lower() if contextual_signal else ""
+    expansions = []
+    
+    # Process lexicon
+    for pattern, syn_str in lexicon_dict.items():
+        if pattern in q_lower or (norm_lower and pattern in norm_lower) or (ctx_lower and pattern in ctx_lower):
+            expansions.append(syn_str)
+            
+    if expansions:
+        return clean_query + " " + " ".join(expansions)
+    return clean_query
 
 
 def expand_locally(
     clean_query: str,
     normalized_signal: Optional[str] = None,
     contextual_signal: Optional[str] = None,
+    snapshot: Optional[Dict[str, Any]] = None,
+    telemetry: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Instant deterministic local domain expansion (0 ms, offline)."""
-    q_lower = clean_query.lower()
-    norm_lower = normalized_signal.lower() if normalized_signal else ""
-    ctx_lower = contextual_signal.lower() if contextual_signal else ""
-    expansions = []
-    for pattern, syns in LOCAL_DOMAIN_LEXICON.items():
-        if pattern in q_lower or (norm_lower and pattern in norm_lower) or (ctx_lower and pattern in ctx_lower):
-            expansions.append(syns)
-    if expansions:
-        return clean_query + " " + " ".join(expansions)
-    return clean_query
+    """Instant deterministic local domain expansion (0 ms, offline).
+    Authoritative mode: Evaluates DB snapshot in parallel. Falls back to hardcoded config if missing."""
+    
+    # Convert snapshot format to flat dict
+    db_lexicon_dict = {}
+    if snapshot and "domain_entries" in snapshot:
+        for concept_key, entries in snapshot["domain_entries"].items():
+            for entry in entries:
+                pattern = entry.get("pattern", "").lower()
+                expansion = entry.get("expansion", "")
+                if pattern and expansion:
+                    if pattern in db_lexicon_dict:
+                        db_lexicon_dict[pattern] += " " + expansion
+                    else:
+                        db_lexicon_dict[pattern] = expansion
+                        
+    authoritative_expansion = _compute_expansion(
+        clean_query, 
+        db_lexicon_dict, 
+        normalized_signal, 
+        contextual_signal
+    )
+            
+    return authoritative_expansion
 
 
 async def expand_query_via_llm(query: str) -> Optional[str]:
@@ -319,40 +151,18 @@ def parse_typesense_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # Post-Retrieval Candidate Reranker (B1 Action Alignment & B2 Multi-Entity)
 # ---------------------------------------------------------------------------
 
-ACTION_INTENT_MAP = {
-    "invoice": {
-        "actions": ["view", "download", "receipt", "history", "see", "find", "purono", "kothay", "pabo"],
-        "target_phrase": "how do i view my invoices?",
-        "penalty_phrase": "how do i update my payment method?"
-    },
-    "payment_method": {
-        "actions": ["update", "change payment", "credit card", "card info", "add card", "পেমেন্ট মেথড", "কার্ড পরিবর্তন", "notun card"],
-        "target_phrase": "how do i update my payment method?",
-        "penalty_phrase": "how do i view my invoices?"
-    },
-    "plan_change": {
-        "actions": ["switch", "upgrade", "downgrade", "annual", "monthly to annual", "প্ল্যান পরিবর্তন", "আপগ্রেড", "plan change", "change plan"],
-        "target_phrase": "can i change my plan?",
-        "penalty_phrase": "how do i update my payment method?"
-    },
-}
-
-MULTI_ENTITY_CUES = [
-    "both", "together", "simultaneously", "multiple channels", "একই সাথে",
-    "একাধিক", "একসাথে", "ekshathe", "ekoi shathe", "duto eksathe"
-]
 
 
-def rerank_candidate_hits(
+
+def _rerank_internal(
     query: str,
     raw_hits: List[Dict[str, Any]],
-    enrichment: Optional[LinguisticEnrichment] = None,
+    enrichment: Optional[LinguisticEnrichment],
+    action_intent_map: Dict[str, Any],
+    multi_entity_cues: List[str],
+    policy_intent_map: Dict[str, Any],
 ) -> tuple[List[Dict[str, Any]], bool, Optional[str]]:
-    """
-    Precision re-ranker applied strictly over Top-5 candidate results.
-    Preserves original score ordering when no high-confidence signals match.
-    Returns: (reranked_hits, reranker_applied, reranker_reason)
-    """
+    """Core reranking logic over arbitrary mappings."""
     if not config.RERANKER_ENABLED or not raw_hits or len(raw_hits) <= 1:
         return raw_hits, False, None
 
@@ -363,7 +173,7 @@ def rerank_candidate_hits(
 
     # 1. B2 Multi-Entity Intent Boost
     if config.RERANKER_MULTI_ENTITY_ENABLED:
-        is_multi_entity = any(cue in q_lower for cue in MULTI_ENTITY_CUES)
+        is_multi_entity = any(cue in q_lower for cue in multi_entity_cues)
         if is_multi_entity:
             for h in hits:
                 q_title = h["question"].lower()
@@ -383,8 +193,8 @@ def rerank_candidate_hits(
             cand_q = cand["question"].lower()
             top1_q = top1["question"].lower()
 
-            for intent_name, intent_data in ACTION_INTENT_MAP.items():
-                matched_action = any(act in q_lower for act in intent_data["actions"])
+            for intent_name, intent_data in action_intent_map.items():
+                matched_action = any(act in q_lower for act in intent_data.get("actions", intent_data.get("action_phrases", intent_data.get("action_keywords", []))))
                 if matched_action:
                     if intent_data["target_phrase"] in cand_q and intent_data["penalty_phrase"] in top1_q:
                         cand["score"] = round(top1["score"] + 0.015, 4)
@@ -402,10 +212,9 @@ def rerank_candidate_hits(
     # 2.5 Scoped Canonical Concept Alignment (Phase 2B Additive Signal)
     if enrichment and enrichment.canonical_concepts:
         top1 = hits[0]
-        for concept in enrichment.canonical_concepts:
-            target_doc = CanonicalConceptMapper.CONCEPT_PATTERNS.get(concept, {}).get("target_doc_type")
-            if not target_doc:
-                continue
+        # target_doc_types are already collected in metadata
+        target_doc_types = enrichment.metadata.get("target_doc_types", [])
+        for target_doc in target_doc_types:
             for i in range(1, min(3, len(hits))):
                 cand = hits[i]
                 delta = round(top1["score"] - cand["score"], 4)
@@ -415,47 +224,12 @@ def rerank_candidate_hits(
                     if cand_type == target_doc and top1_type != target_doc:
                         cand["score"] = round(top1["score"] + 0.02, 4)
                         applied = True
-                        reasons.append(f"concept_align_{concept.lower()}")
+                        reasons.append(f"concept_align_{target_doc}")
                         hits.sort(key=lambda x: (x["score"], x.get("priority", 0)), reverse=True)
                         top1 = hits[0]
                         break
 
     # 3. Direct Commerce Policy Intent Alignment on close delta
-    POLICY_INTENT_MAP = {
-        "return_policy": {
-            "cues": ["রিটার্ন", "পণ্য ফেরত", "ফেরত দিতে", "ফেরত দেওয়া", "নন-রিটার্নেবল", "return policy", "can i return", "return product"],
-            "target_doc_types": ["return_policy"],
-        },
-        "delivery_policy": {
-            "cues": ["ডেলিভারি চার্জ", "ডেলিভারি সময়", "কুরিয়ার চার্জ", "শিপিং", "সেইম ডে ডেলিভারি", "ঢাকায় ডেলিভারি", "সারাদেশে ডেলিভারি", "পার্সেল ট্র্যাকিং", "ট্র্যাকিং কোড", "ডেলিভারি হতে কত দিন", "delivery charge", "shipping fee"],
-            "target_doc_types": ["delivery_policy"],
-        },
-        "payment_policy": {
-            "cues": ["পেমেন্ট", "বিকাশ", "নগদ", "ক্যাশ অন ডেলিভারি", "payment method", "cod"],
-            "target_doc_types": ["payment_policy"],
-        },
-        "warranty_policy": {
-            "cues": ["ওয়ারেন্টি", "গ্যারান্টি", "সেলাই ছুটে", "বোতাম ভাঙা", "নষ্ট কাপড়", "সার্ভিসিং", "ইনভয়েস", "ইনভয়েস", "ক্লেইম", "warranty", "guarantee"],
-            "target_doc_types": ["warranty_policy"],
-        },
-        "privacy_policy": {
-            "cues": ["গোপনীয়তা", "তথ্য সুরক্ষা", "থার্ড পার্টি", "ডাটা সুরক্ষা", "privacy policy", "third party"],
-            "target_doc_types": ["privacy_policy"],
-        },
-        "exchange_policy": {
-            "cues": ["সাইজ বদলানো", "কালার বদলানো", "এক্সচেঞ্জ", "সাইজ পরিবর্তন", "exchange policy"],
-            "target_doc_types": ["exchange_policy"],
-        },
-        "customer_support": {
-            "cues": ["কাস্টমার কেয়ার", "কাস্টমার কেয়ার", "হেল্পলাইন", "খোলা থাকে", "যোগাযোগ", "customer support", "helpline"],
-            "target_doc_types": ["customer_support", "contact"],
-        },
-        "cancellation_policy": {
-            "cues": ["অর্ডার বাতিল", "বাতিল করার নিয়ম", "cancel order"],
-            "target_doc_types": ["cancellation_policy"],
-        },
-    }
-
     top1 = hits[0]
     for i in range(1, min(3, len(hits))):
         cand = hits[i]
@@ -464,9 +238,9 @@ def rerank_candidate_hits(
             cand_type = cand.get("document_type", "faq")
             top1_type = top1.get("document_type", "faq")
             if cand_type != top1_type:
-                for pol_name, pol_data in POLICY_INTENT_MAP.items():
-                    if any(cue in q_lower for cue in pol_data["cues"]):
-                        if cand_type in pol_data["target_doc_types"] and top1_type not in pol_data["target_doc_types"]:
+                for pol_name, pol_data in policy_intent_map.items():
+                    if any(cue in q_lower for cue in pol_data.get("cues", pol_data.get("action_phrases", pol_data.get("cue_phrases", [])))):
+                        if cand_type in pol_data.get("target_doc_types", []) and top1_type not in pol_data.get("target_doc_types", []):
                             cand["score"] = round(top1["score"] + 0.02, 4)
                             applied = True
                             reasons.append(f"policy_align_{pol_name}")
@@ -475,6 +249,33 @@ def rerank_candidate_hits(
     hits.sort(key=lambda x: (x["score"], x.get("priority", 0)), reverse=True)
     reason_str = ", ".join(reasons) if applied else None
     return hits, applied, reason_str
+
+
+def rerank_candidate_hits(
+    query: str,
+    raw_hits: List[Dict[str, Any]],
+    enrichment: Optional[LinguisticEnrichment] = None,
+    snapshot: Optional[Dict[str, Any]] = None,
+    telemetry: Optional[Dict[str, Any]] = None,
+) -> tuple[List[Dict[str, Any]], bool, Optional[str]]:
+    """
+    Precision re-ranker applied strictly over Top-5 candidate results.
+    Authoritative mode evaluates DB-backed snapshot. Falls back to hardcoded config.
+    """
+
+    action_mappings = snapshot.get("action_mappings", {}) if snapshot else {}
+    policy_mappings = snapshot.get("policy_mappings", {}) if snapshot else {}
+
+    db_multi_entity_cues = []
+    if snapshot and "concept_patterns" in snapshot and "MULTI_ENTITY_DETECTION" in snapshot["concept_patterns"]:
+        db_multi_entity_cues = snapshot["concept_patterns"]["MULTI_ENTITY_DETECTION"].get("positive_phrases", [])
+
+    hits, applied, reason = _rerank_internal(
+        query, raw_hits, enrichment, action_mappings, db_multi_entity_cues, policy_mappings
+    )
+
+    return hits, applied, reason
+
 
 
 # ---------------------------------------------------------------------------
@@ -499,16 +300,29 @@ async def search_knowledge_base(
     clean_query = preprocess_query(query)
     client = get_typesense_client()
     candidate_pool = max(5, top_k)
+    
+    # Init telemetry dict
+    telemetry = {
+        "request_id": request_id,
+        "workspace_id": workspace_id,
+        "shadow_match_concept": None,
+        "shadow_match_expansion": None,
+        "shadow_match_rerank": None,
+    }
+
+    # Fetch DB snapshot for Shadow Mode
+    from app.lexicon_repository import repository
+    snapshot = await repository.get_or_fetch_snapshot(workspace_id)
 
     # Phase 2A & 2B: Language Profiling & Canonical Concept Mapping
     lang_profile = LanguageProfiler.profile(clean_query)
-    enrichment = CanonicalConceptMapper.map_concepts(clean_query, lang_profile)
+    enrichment = CanonicalConceptMapper.map_concepts(clean_query, lang_profile, snapshot, telemetry)
 
     # Phase 2E: If auxiliary contextual_signal provided, enrich canonical concepts
     # User original query remains 100% immutable!
     if contextual_signal:
         ctx_profile = LanguageProfiler.profile(contextual_signal)
-        ctx_enrichment = CanonicalConceptMapper.map_concepts(contextual_signal, ctx_profile)
+        ctx_enrichment = CanonicalConceptMapper.map_concepts(contextual_signal, ctx_profile, snapshot)
         if ctx_enrichment.canonical_concepts:
             for c in ctx_enrichment.canonical_concepts:
                 if c not in enrichment.canonical_concepts:
@@ -541,7 +355,7 @@ async def search_knowledge_base(
     # If raw query score is moderate/low (< 0.55), apply local domain synonyms (0ms latency penalty)
     if first_pass_top_score < 0.55:
         norm_sig = enrichment.metadata.get("normalized_signal")
-        local_expanded = expand_locally(clean_query, normalized_signal=norm_sig, contextual_signal=contextual_signal)
+        local_expanded = expand_locally(clean_query, normalized_signal=norm_sig, contextual_signal=contextual_signal, snapshot=snapshot, telemetry=telemetry)
         if local_expanded != clean_query:
             tier_executed = "tier2_local_deterministic"
             expansion_applied = True
@@ -592,16 +406,14 @@ async def search_knowledge_base(
             current_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)[:candidate_pool]
 
     # ── Post-Retrieval Precision Reranking (B1 Action Alignment & B2 Multi-Entity) ──
-    reranked_hits, reranker_applied, reranker_reason = rerank_candidate_hits(clean_query, current_hits, enrichment=enrichment)
+    reranked_hits, reranker_applied, reranker_reason = rerank_candidate_hits(clean_query, current_hits, enrichment=enrichment, snapshot=snapshot, telemetry=telemetry)
     final_hits = reranked_hits[:top_k]
 
     total_retrieval_latency_ms = round((time.time() - t_total_start) * 1000, 2)
     final_score = final_hits[0]["score"] if final_hits else 0.0
     returned_faq_ids = [h["id"] for h in final_hits]
 
-    telemetry = {
-        "request_id": request_id,
-        "workspace_id": workspace_id,
+    telemetry.update({
         "language_profile": lang_profile.language.value,
         "script_profile": lang_profile.script.value,
         "canonical_concepts": enrichment.canonical_concepts,
@@ -615,7 +427,7 @@ async def search_knowledge_base(
         "final_score": final_score,
         "latency_total_ms": total_retrieval_latency_ms,
         "returned_faq_ids": returned_faq_ids,
-    }
+    })
 
     logger.info(
         "Search: '%s' -> %d hits, tier=%s, score=%.4f (first_pass=%.4f), reranked=%s (%s), latency=%.2fms",

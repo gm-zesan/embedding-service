@@ -77,6 +77,9 @@ class RetrievalTelemetry(BaseModel):
     returned_faq_ids: List[str] = []
     reranker_applied: bool = False
     reranker_reason: Optional[str] = None
+    shadow_match_concept: Optional[bool] = None
+    shadow_match_expansion: Optional[bool] = None
+    shadow_match_rerank: Optional[bool] = None
 
 
 class SearchResponse(BaseModel):
@@ -109,3 +112,11 @@ class SyncFAQResponse(BaseModel):
 class DeleteFAQResponse(BaseModel):
     status: str = "deleted"
     id: str
+
+
+class ReloadLexiconResponse(BaseModel):
+    status: str = "reloaded"
+    workspace_id: int
+    snapshot_version: int
+    global_version: int
+    workspace_version: int

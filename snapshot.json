@@ -1,0 +1,24 @@
+
+   Illuminate\Database\QueryException 
+
+  SQLSTATE[HY000] [2002] Operation not permitted (Connection: mysql, Host: 127.0.0.1, Port: 3306, Database: chatbot_core, SQL: select * from `lexicon_domain_entries` where `status` = ACTIVE and `workspace_id` in (0, 0))
+
+  at vendor/laravel/framework/src/Illuminate/Database/Connection.php:838
+    834▕             $exceptionType = $this->isUniqueConstraintError($e)
+    835▕                 ? UniqueConstraintViolationException::class
+    836▕                 : QueryException::class;
+    837▕ 
+  ➜ 838▕             throw new $exceptionType(
+    839▕                 $this->getNameWithReadWriteType(),
+    840▕                 $query,
+    841▕                 $this->prepareBindings($bindings),
+    842▕                 $e,
+
+      [2m+19 vendor frames [22m
+
+  20  app/Services/Lexicon/LexiconSnapshotService.php:23
+      Illuminate\Database\Eloquent\Builder::get()
+
+  21  dump_snapshot.php:6
+      App\Services\Lexicon\LexiconSnapshotService::buildSnapshot()
+

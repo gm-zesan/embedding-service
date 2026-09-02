@@ -3,7 +3,9 @@ import time
 import gc
 import threading
 
+# pyrefly: ignore [missing-import]
 import torch
+# pyrefly: ignore [missing-import]
 from sentence_transformers import SentenceTransformer
 
 from app.config import MODEL_NAME, EMBED_BATCH_SIZE
@@ -37,7 +39,7 @@ def load_model() -> SentenceTransformer:
 
     logger.info("Loading model: %s", MODEL_NAME)
     start = time.time()
-    _model = SentenceTransformer(MODEL_NAME)
+    _model = SentenceTransformer(MODEL_NAME, local_files_only=True)
     elapsed = time.time() - start
     _embedding_dimension = _model.get_sentence_embedding_dimension()
     logger.info(

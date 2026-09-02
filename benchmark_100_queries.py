@@ -1,3 +1,13 @@
+import os
+os.environ['no_proxy'] = '127.0.0.1,localhost'
+os.environ['NO_PROXY'] = '127.0.0.1,localhost'
+import app.config
+app.config.MODEL_NAME = '/Users/zesan/.cache/huggingface/hub/models--sentence-transformers--paraphrase-multilingual-mpnet-base-v2/snapshots/4328cf26390c98c5e3c738b4460a05b95f4911f5'
+import os
+
+
+
+
 import asyncio
 import io
 import json
@@ -175,6 +185,9 @@ async def run_benchmark_100():
     total_latencies = []
     category_metrics = {}
 
+    from app.retrieval_engine import search_knowledge_base
+    from app.embedding import load_model
+    load_model()
     async with httpx.AsyncClient(timeout=25.0) as client:
         for idx, item in enumerate(BENCHMARK_100_DATASET, 1):
             query = item["query"]
@@ -188,22 +201,14 @@ async def run_benchmark_100():
 
             t0 = time.time()
             try:
-                resp = await client.post(SEARCH_URL, json={
-                    "query": query,
-                    "workspace_id": 1,
-                    "top_k": 5,
-                })
+                data = await search_knowledge_base(query, workspace_id=1, top_k=5)
                 duration_ms = round((time.time() - t0) * 1000, 1)
             except Exception as e:
                 print(f"[{idx}] EXCEPTION: {e}")
                 continue
 
             total_latencies.append(duration_ms)
-            if resp.status_code != 200:
-                print(f"[{idx}] HTTP ERROR {resp.status_code}: {query}")
-                continue
-
-            data = resp.json()
+            
             hits = data.get("results", [])
             expanded = data.get("expansion_applied", False)
             telemetry = data.get("telemetry", {})

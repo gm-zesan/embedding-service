@@ -47,6 +47,8 @@ from app.typesense_engine import (
     delete_faq_document,
 )
 from app.retrieval_engine import search_knowledge_base
+from app.lexicon_repository import repository as lexicon_repo
+from app.models import ReloadLexiconResponse
 
 # ---------------------------------------------------------------------------
 # Request-ID logging context
@@ -110,6 +112,12 @@ async def lifespan(app: FastAPI):
         # Initialize Typesense FAQ collection schema
         ts_client = get_typesense_client()
         ensure_faq_collection(ts_client)
+        # Attempt to load initial global lexicon snapshot (fallback to hardcoded if API is unavailable)
+        try:
+            import asyncio
+            asyncio.create_task(lexicon_repo.fetch_and_reload(workspace_id=0))
+        except Exception as e:
+            logger.warning("Could not fetch initial lexicon snapshot: %s", e)
     except Exception:
         logger.exception("Failed during startup initialization")
     yield
@@ -299,6 +307,32 @@ def delete_faq(faq_id: str):
     delete_faq_document(client, faq_id)
 
     return DeleteFAQResponse(status="deleted", id=faq_id)
+
+
+@app.post(
+    "/api/v1/lexicon/reload",
+    response_model=ReloadLexiconResponse,
+    tags=["Lexicon Configuration"],
+    dependencies=[Depends(verify_api_key)],
+)
+async def reload_lexicon(workspace_id: int = 0):
+    """
+    Triggers an atomic reload of the DB-driven lexicon snapshot for the specified workspace.
+    Requires external API call to the Laravel orchestrator.
+    """
+    try:
+        snapshot = await lexicon_repo.fetch_and_reload(workspace_id)
+        return ReloadLexiconResponse(
+            status="reloaded",
+            workspace_id=workspace_id,
+            snapshot_version=snapshot.get("snapshot_version", 0),
+            global_version=snapshot.get("global_version", 0),
+            workspace_version=snapshot.get("workspace_version", 0)
+        )
+    except Exception as e:
+        logger.error("Failed to reload lexicon: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to reload lexicon: {e}")
+
 
 
 # ---------------------------------------------------------------------------
