@@ -5,6 +5,7 @@ import httpx
 from typing import Any, Dict, List, Optional
 from app import config
 from app.embedding import embed
+from app.linguistics import CanonicalConceptMapper, LanguageProfiler, LinguisticEnrichment
 from app.llm import LLMRequest, default_client as llm_client
 from app.typesense_engine import execute_hybrid_search, get_typesense_client
 
@@ -316,7 +317,11 @@ MULTI_ENTITY_CUES = [
 ]
 
 
-def rerank_candidate_hits(query: str, raw_hits: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], bool, Optional[str]]:
+def rerank_candidate_hits(
+    query: str,
+    raw_hits: List[Dict[str, Any]],
+    enrichment: Optional[LinguisticEnrichment] = None,
+) -> tuple[List[Dict[str, Any]], bool, Optional[str]]:
     """
     Precision re-ranker applied strictly over Top-5 candidate results.
     Preserves original score ordering when no high-confidence signals match.
@@ -367,6 +372,27 @@ def rerank_candidate_hits(query: str, raw_hits: List[Dict[str, Any]]) -> tuple[L
                         break
 
     hits.sort(key=lambda x: (x["score"], x.get("priority", 0)), reverse=True)
+
+    # 2.5 Scoped Canonical Concept Alignment (Phase 2B Additive Signal)
+    if enrichment and enrichment.canonical_concepts:
+        top1 = hits[0]
+        for concept in enrichment.canonical_concepts:
+            target_doc = CanonicalConceptMapper.CONCEPT_PATTERNS.get(concept, {}).get("target_doc_type")
+            if not target_doc:
+                continue
+            for i in range(1, min(3, len(hits))):
+                cand = hits[i]
+                delta = round(top1["score"] - cand["score"], 4)
+                if 0.0 < delta <= 0.15:
+                    cand_type = cand.get("document_type", "faq")
+                    top1_type = top1.get("document_type", "faq")
+                    if cand_type == target_doc and top1_type != target_doc:
+                        cand["score"] = round(top1["score"] + 0.02, 4)
+                        applied = True
+                        reasons.append(f"concept_align_{concept.lower()}")
+                        hits.sort(key=lambda x: (x["score"], x.get("priority", 0)), reverse=True)
+                        top1 = hits[0]
+                        break
 
     # 3. Direct Commerce Policy Intent Alignment on close delta
     POLICY_INTENT_MAP = {
@@ -447,6 +473,10 @@ async def search_knowledge_base(
     client = get_typesense_client()
     candidate_pool = max(5, top_k)
 
+    # Phase 2A & 2B: Language Profiling & Canonical Concept Mapping
+    lang_profile = LanguageProfiler.profile(clean_query)
+    enrichment = CanonicalConceptMapper.map_concepts(clean_query, lang_profile)
+
     tier_executed = "tier1_raw_fastpath"
     expansion_applied = False
     expanded_query = None
@@ -520,7 +550,7 @@ async def search_knowledge_base(
             current_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)[:candidate_pool]
 
     # ── Post-Retrieval Precision Reranking (B1 Action Alignment & B2 Multi-Entity) ──
-    reranked_hits, reranker_applied, reranker_reason = rerank_candidate_hits(clean_query, current_hits)
+    reranked_hits, reranker_applied, reranker_reason = rerank_candidate_hits(clean_query, current_hits, enrichment=enrichment)
     final_hits = reranked_hits[:top_k]
 
     total_retrieval_latency_ms = round((time.time() - t_total_start) * 1000, 2)
@@ -530,6 +560,9 @@ async def search_knowledge_base(
     telemetry = {
         "request_id": request_id,
         "workspace_id": workspace_id,
+        "language_profile": lang_profile.language.value,
+        "script_profile": lang_profile.script.value,
+        "canonical_concepts": enrichment.canonical_concepts,
         "tier_executed": tier_executed,
         "first_pass_score": first_pass_top_score,
         "first_pass_top_id": first_pass_top_id,
