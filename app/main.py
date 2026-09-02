@@ -212,6 +212,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 
 @app.get("/health", tags=["Monitoring"])
+@app.get("/api/v1/health", tags=["Monitoring"])
 def health():
     """Health check with model metadata, Typesense status, and uptime."""
     model = get_model()
@@ -311,6 +312,12 @@ def delete_faq(faq_id: str):
 
 @app.post(
     "/api/v1/lexicon/reload",
+    response_model=ReloadLexiconResponse,
+    tags=["Lexicon Configuration"],
+    dependencies=[Depends(verify_api_key)],
+)
+@app.post(
+    "/lexicon/reload",
     response_model=ReloadLexiconResponse,
     tags=["Lexicon Configuration"],
     dependencies=[Depends(verify_api_key)],
