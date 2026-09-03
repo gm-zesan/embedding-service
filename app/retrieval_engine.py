@@ -99,7 +99,7 @@ async def expand_query_via_llm(query: str) -> Optional[str]:
             {"role": "user", "content": query},
         ],
         temperature=0.1,
-        max_tokens=40,
+        max_tokens=150,
     )
 
     try:
