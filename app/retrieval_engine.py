@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 # pyrefly: ignore [missing-import]
@@ -315,8 +316,10 @@ async def search_knowledge_base(
     snapshot = await repository.get_or_fetch_snapshot(workspace_id)
 
     # Phase 2A & 2B: Language Profiling & Canonical Concept Mapping
+    t_profile_start = time.time()
     lang_profile = LanguageProfiler.profile(clean_query)
     enrichment = CanonicalConceptMapper.map_concepts(clean_query, lang_profile, snapshot, telemetry)
+    t_profile_ms = round((time.time() - t_profile_start) * 1000, 2)
 
     # Phase 2E: If auxiliary contextual_signal provided, enrich canonical concepts
     # User original query remains 100% immutable!
@@ -338,14 +341,22 @@ async def search_knowledge_base(
 
     # ── Tier 1: Fast-Path Raw Dense Hybrid Search ──────────────────────────────
     t1_start = time.time()
-    raw_vector = embed(clean_query)
-    first_search_res = execute_hybrid_search(
+    t_embed_start = time.time()
+    raw_vector = await asyncio.to_thread(embed, clean_query)
+    t_embed_ms = round((time.time() - t_embed_start) * 1000, 2)
+
+    t_ts_start = time.time()
+    first_search_res = await asyncio.to_thread(
+        execute_hybrid_search,
         client=client,
         query_text=clean_query,
         query_vector=raw_vector,
         workspace_id=workspace_id,
         top_k=candidate_pool,
     )
+    t_typesense_ms = round((time.time() - t_ts_start) * 1000, 2)
+    t_tier1_ms = round((time.time() - t1_start) * 1000, 2)
+
     first_pass_hits = parse_typesense_hits(first_search_res.get("hits", []))
     first_pass_top_score = first_pass_hits[0]["score"] if first_pass_hits else 0.0
     first_pass_top_id = first_pass_hits[0]["id"] if first_pass_hits else None
@@ -353,7 +364,9 @@ async def search_knowledge_base(
 
     # ── Tier 2: Deterministic Domain & Synonym Expansion ───────────────────────
     # If raw query score is moderate/low (< 0.55), apply local domain synonyms (0ms latency penalty)
+    t_tier2_ms = 0.0
     if first_pass_top_score < 0.55:
+        t2_start = time.time()
         norm_sig = enrichment.metadata.get("normalized_signal")
         local_expanded = expand_locally(clean_query, normalized_signal=norm_sig, contextual_signal=contextual_signal, snapshot=snapshot, telemetry=telemetry)
         if local_expanded != clean_query:
@@ -361,8 +374,9 @@ async def search_knowledge_base(
             expansion_applied = True
             expanded_query = local_expanded
             
-            t2_vec = embed(local_expanded)
-            t2_search_res = execute_hybrid_search(
+            t2_vec = await asyncio.to_thread(embed, local_expanded)
+            t2_search_res = await asyncio.to_thread(
+                execute_hybrid_search,
                 client=client,
                 query_text=local_expanded,
                 query_vector=t2_vec,
@@ -377,19 +391,23 @@ async def search_knowledge_base(
                 if h["id"] not in hit_map or h["score"] > hit_map[h["id"]]["score"]:
                     hit_map[h["id"]] = h
             current_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)[:candidate_pool]
+        t_tier2_ms = round((time.time() - t2_start) * 1000, 2)
 
     # ── Tier 3: Controlled Escape-Hatch LLM Expansion ──────────────────────────
     # Only triggered if after Tier 1 & 2 the top score remains critically low (< 0.35)
+    t_tier3_ms = 0.0
     current_top_score = current_hits[0]["score"] if current_hits else 0.0
     if current_top_score < 0.35 and config.LLM_EXPANSION_API_KEY:
+        t3_start = time.time()
         llm_expanded = await expand_query_via_llm(clean_query)
         if llm_expanded:
             tier_executed = "tier3_llm_escape_hatch"
             expansion_applied = True
             expanded_query = f"{clean_query} {llm_expanded}"
 
-            t3_vec = embed(expanded_query)
-            t3_search_res = execute_hybrid_search(
+            t3_vec = await asyncio.to_thread(embed, expanded_query)
+            t3_search_res = await asyncio.to_thread(
+                execute_hybrid_search,
                 client=client,
                 query_text=expanded_query,
                 query_vector=t3_vec,
@@ -404,9 +422,12 @@ async def search_knowledge_base(
                 if h["id"] not in hit_map or h["score"] > hit_map[h["id"]]["score"]:
                     hit_map[h["id"]] = h
             current_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)[:candidate_pool]
+        t_tier3_ms = round((time.time() - t3_start) * 1000, 2)
 
     # ── Post-Retrieval Precision Reranking (B1 Action Alignment & B2 Multi-Entity) ──
+    t_rerank_start = time.time()
     reranked_hits, reranker_applied, reranker_reason = rerank_candidate_hits(clean_query, current_hits, enrichment=enrichment, snapshot=snapshot, telemetry=telemetry)
+    t_rerank_ms = round((time.time() - t_rerank_start) * 1000, 2)
     final_hits = reranked_hits[:top_k]
 
     total_retrieval_latency_ms = round((time.time() - t_total_start) * 1000, 2)
@@ -425,7 +446,15 @@ async def search_knowledge_base(
         "reranker_applied": reranker_applied,
         "reranker_reason": reranker_reason,
         "final_score": final_score,
+        "profile_ms": t_profile_ms,
+        "embedding_ms": t_embed_ms,
+        "typesense_ms": t_typesense_ms,
+        "tier1_ms": t_tier1_ms,
+        "tier2_ms": t_tier2_ms,
+        "tier3_ms": t_tier3_ms,
+        "rerank_ms": t_rerank_ms,
         "latency_total_ms": total_retrieval_latency_ms,
+        "total_retrieval_latency_ms": total_retrieval_latency_ms,
         "returned_faq_ids": returned_faq_ids,
     })
 

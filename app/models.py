@@ -74,6 +74,14 @@ class RetrievalTelemetry(BaseModel):
     expansion_latency_ms: float = 0.0
     second_pass_latency_ms: float = 0.0
     total_retrieval_latency_ms: float = 0.0
+    tier_executed: Optional[str] = None
+    tier1_ms: float = 0.0
+    tier2_ms: float = 0.0
+    tier3_ms: float = 0.0
+    embedding_ms: float = 0.0
+    typesense_ms: float = 0.0
+    rerank_ms: float = 0.0
+    profile_ms: float = 0.0
     returned_faq_ids: List[str] = []
     reranker_applied: bool = False
     reranker_reason: Optional[str] = None
