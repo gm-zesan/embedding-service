@@ -87,39 +87,57 @@ class LexiconRepository:
             assert data.get("target_doc_type") is not None, f"Missing CONCEPT_META for {concept_key}"
             assert len(data.get("positive_phrases", [])) > 0, f"No POSITIVE phrases for {concept_key}"
 
+    def load_snapshot(self, workspace_id: int, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validates and atomically swaps a provided snapshot into memory.
+        Does not require external HTTP fetch.
+        """
+        self.validate_snapshot(snapshot)
+        with self.swap_lock:
+            self.snapshots[workspace_id] = snapshot
+
+        logger.info(
+            "Successfully loaded lexicon snapshot for workspace %s (Version: %s)",
+            workspace_id,
+            snapshot.get("snapshot_version", "unknown")
+        )
+        return snapshot
+
     async def fetch_and_reload(self, workspace_id: int) -> Dict[str, Any]:
         """
         Fetches the latest snapshot for a workspace from the Laravel API,
         validates it, and atomically swaps it into memory.
         """
-        endpoint = f"{self.laravel_url}/api/v1/internal/lexicon/snapshot?workspace_id={workspace_id}"
-        
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(endpoint)
-                response.raise_for_status()
-                snapshot = response.json()
-                
-        except Exception as e:
-            logger.error("Failed to fetch lexicon snapshot for workspace %s: %s", workspace_id, e)
-            raise
-            
-        # Validate BEFORE taking the lock or swapping
-        try:
-            self.validate_snapshot(snapshot)
-        except AssertionError as e:
-            logger.error("Snapshot validation failed for workspace %s: %s", workspace_id, e)
-            raise
-            
-        # Atomic swap
-        with self.swap_lock:
-            # We assign a completely new dictionary reference for this workspace
-            self.snapshots[workspace_id] = snapshot
-            
-        logger.info("Successfully reloaded lexicon snapshot for workspace %s (Version: %s)", 
-                   workspace_id, snapshot.get("snapshot_version", "unknown"))
-                   
-        return snapshot
+        candidate_urls = [
+            self.laravel_url,
+            "http://127.0.0.1:8000",
+            "http://127.0.0.1:8002",
+        ]
+        # Deduplicate preserving order
+        candidate_urls = list(dict.fromkeys(candidate_urls))
+
+        snapshot = None
+        last_error = None
+
+        for base_url in candidate_urls:
+            endpoint = f"{base_url.rstrip('/')}/api/v1/internal/lexicon/snapshot?workspace_id={workspace_id}"
+            try:
+                async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
+                    response = await client.get(endpoint)
+                    if response.status_code == 200:
+                        snapshot = response.json()
+                        break
+                    else:
+                        last_error = f"HTTP {response.status_code} from {endpoint}"
+            except Exception as e:
+                last_error = str(e) or type(e).__name__
+                continue
+
+        if snapshot is None:
+            logger.error("Failed to fetch lexicon snapshot for workspace %s: %s", workspace_id, last_error)
+            raise RuntimeError(f"Could not reach Laravel API to fetch snapshot: {last_error}")
+
+        return self.load_snapshot(workspace_id, snapshot)
 
     def get_status(self) -> Dict[str, Any]:
         """Returns the current loaded versions and sizes for all workspaces."""

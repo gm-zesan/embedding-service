@@ -52,3 +52,7 @@ LLM_EXPANSION_MODEL = RETRIEVAL_LLM_MODEL
 RERANKER_ENABLED = os.getenv("RERANKER_ENABLED", "true").lower() in ("true", "1")
 RERANKER_CLOSE_DELTA = float(os.getenv("RERANKER_CLOSE_DELTA", "0.06"))
 RERANKER_MULTI_ENTITY_ENABLED = os.getenv("RERANKER_MULTI_ENTITY_ENABLED", "true").lower() in ("true", "1")
+
+# -- Laravel Integration --
+LARAVEL_API_URL = os.getenv("LARAVEL_API_URL", "http://127.0.0.1:8000")
+

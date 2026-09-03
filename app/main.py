@@ -1,6 +1,7 @@
 import logging
 import time
 import uuid
+from typing import Optional, Dict, Any
 
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -48,7 +49,7 @@ from app.typesense_engine import (
 )
 from app.retrieval_engine import search_knowledge_base
 from app.lexicon_repository import repository as lexicon_repo
-from app.models import ReloadLexiconResponse
+from app.models import ReloadLexiconResponse, ReloadLexiconRequest
 
 # ---------------------------------------------------------------------------
 # Request-ID logging context
@@ -322,16 +323,26 @@ def delete_faq(faq_id: str):
     tags=["Lexicon Configuration"],
     dependencies=[Depends(verify_api_key)],
 )
-async def reload_lexicon(workspace_id: int = 0):
+async def reload_lexicon(
+    workspace_id: int = 0,
+    body: Optional[ReloadLexiconRequest] = None
+):
     """
     Triggers an atomic reload of the DB-driven lexicon snapshot for the specified workspace.
-    Requires external API call to the Laravel orchestrator.
+    Accepts snapshot directly in body or fetches from Laravel backend.
     """
+    target_ws = body.workspace_id if (body and body.workspace_id) else workspace_id
+    provided_snapshot = body.snapshot if body else None
+
     try:
-        snapshot = await lexicon_repo.fetch_and_reload(workspace_id)
+        if provided_snapshot:
+            snapshot = lexicon_repo.load_snapshot(target_ws, provided_snapshot)
+        else:
+            snapshot = await lexicon_repo.fetch_and_reload(target_ws)
+
         return ReloadLexiconResponse(
             status="reloaded",
-            workspace_id=workspace_id,
+            workspace_id=target_ws,
             snapshot_version=snapshot.get("snapshot_version", 0),
             global_version=snapshot.get("global_version", 0),
             workspace_version=snapshot.get("workspace_version", 0)

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Any
 # pyrefly: ignore [missing-import]
 from pydantic import BaseModel, Field
 
@@ -114,9 +114,15 @@ class DeleteFAQResponse(BaseModel):
     id: str
 
 
+class ReloadLexiconRequest(BaseModel):
+    workspace_id: int = 0
+    snapshot: Optional[dict[str, Any]] = None
+
+
 class ReloadLexiconResponse(BaseModel):
     status: str = "reloaded"
     workspace_id: int
     snapshot_version: int
     global_version: int
     workspace_version: int
+
