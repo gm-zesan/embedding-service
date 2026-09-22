@@ -111,12 +111,6 @@ async def lifespan(app: FastAPI):
         # Initialize Typesense FAQ collection schema
         ts_client = get_typesense_client()
         ensure_faq_collection(ts_client)
-        # Attempt to load initial global lexicon snapshot (fallback to hardcoded if API is unavailable)
-        try:
-            import asyncio
-            asyncio.create_task(lexicon_repo.fetch_and_reload(workspace_id=0))
-        except Exception as e:
-            logger.warning("Could not fetch initial lexicon snapshot: %s", e)
     except Exception:
         logger.exception("Failed during startup initialization")
     yield

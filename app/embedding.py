@@ -27,6 +27,16 @@ def get_embedding_dimension() -> int:
     return _embedding_dimension
 
 
+def _resolve_model_path() -> str:
+    import os
+    import glob
+    hub_path = os.path.expanduser("~/.cache/huggingface/hub/models--sentence-transformers--paraphrase-multilingual-mpnet-base-v2/snapshots/*")
+    snapshots = glob.glob(hub_path)
+    if snapshots and os.path.isdir(snapshots[0]):
+        return snapshots[0]
+    return MODEL_NAME
+
+
 def load_model() -> SentenceTransformer:
     """Load the embedding model into memory.
 
@@ -37,9 +47,10 @@ def load_model() -> SentenceTransformer:
     if _model is not None:
         return _model
 
-    logger.info("Loading model: %s", MODEL_NAME)
+    resolved_path = _resolve_model_path()
+    logger.info("Loading model: %s (resolved to %s)", MODEL_NAME, resolved_path)
     start = time.time()
-    _model = SentenceTransformer(MODEL_NAME, local_files_only=True)
+    _model = SentenceTransformer(resolved_path)
     elapsed = time.time() - start
     _embedding_dimension = _model.get_sentence_embedding_dimension()
     logger.info(

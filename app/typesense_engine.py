@@ -79,7 +79,7 @@ def execute_hybrid_search(
     top_k: int = 5,
 ) -> Dict[str, Any]:
     """Execute native Typesense hybrid search using multi_search (POST) to support large 768-d vector payloads."""
-    vector_str = f"embedding:([{','.join(f'{x:.5f}' for x in query_vector)}], k:{top_k})"
+    vector_str = f"embedding:([{','.join(f'{x:.5f}' for x in query_vector)}], k:{max(50, top_k * 5)}, alpha:0.7)"
 
     search_query = {
         'collection': config.TYPESENSE_COLLECTION,

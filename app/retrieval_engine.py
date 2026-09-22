@@ -64,17 +64,31 @@ def parse_typesense_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for hit in hits:
         doc = hit.get("document", {})
         vector_distance = hit.get("vector_distance")
-        text_match = hit.get("text_match")
+        tm_info = hit.get("text_match_info", {})
+        tokens_matched = tm_info.get("tokens_matched", 0)
+        tokens_dropped = tm_info.get("num_tokens_dropped", 0)
 
         # Cosine distance to similarity: 1.0 - distance (clamped to [0.0, 1.0])
         if vector_distance is not None:
             semantic_score = round(max(0.0, min(1.0, 1.0 - float(vector_distance))), 4)
-            match_type = "hybrid" if text_match else "vector"
-            final_score = semantic_score
         else:
             semantic_score = 0.0
-            match_type = "keyword"
-            final_score = 0.20  # Low baseline score for keyword-only matches without vector similarity
+
+        # Calculate keyword match coverage
+        total_tokens = tokens_matched + tokens_dropped
+        keyword_ratio = (tokens_matched / total_tokens) if total_tokens > 0 else 0.0
+
+        if keyword_ratio >= 0.8 and tokens_matched >= 2:
+            # High full-keyword match confirmation
+            final_score = round(max(semantic_score, 0.50 * semantic_score + 0.50 * keyword_ratio), 4)
+            match_type = "hybrid"
+        elif tokens_matched > 0 and semantic_score > 0.30:
+            # Partial keyword match with moderate semantic support
+            final_score = round(0.80 * semantic_score + 0.20 * keyword_ratio, 4)
+            match_type = "hybrid"
+        else:
+            match_type = "vector"
+            final_score = semantic_score
 
         results.append({
             "id": str(doc.get("id")),
@@ -84,7 +98,7 @@ def parse_typesense_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "priority": doc.get("priority", 0),
             "score": final_score,
             "match_type": match_type,
-            "keyword_score": 1.0 if text_match else 0.0,
+            "keyword_score": round(keyword_ratio, 4),
             "semantic_score": semantic_score,
         })
 
