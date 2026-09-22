@@ -4,7 +4,7 @@ Translates structured query results and plan metadata into clean, screenshot-rea
 """
 
 from typing import List, Dict, Any
-from app.analytics.models import AnalyticsQueryPlan
+from app.analytics.models import SemanticQueryPlan
 
 
 class AnalyticsFormatter:
@@ -19,7 +19,7 @@ class AnalyticsFormatter:
     def format(
         self,
         question: str,
-        plan: AnalyticsQueryPlan,
+        plan: SemanticQueryPlan,
         results: List[Dict[str, Any]],
         latency_ms: float = 0.0,
     ) -> str:

@@ -8,12 +8,14 @@ from typing import List, Optional, Tuple, Dict, Set
 # pyrefly: ignore [missing-import]
 from pydantic import BaseModel, Field
 
-from app.analytics.models_v2 import (
-    DomainEnum,
-    FanoutRisk,
-    CardinalityType,
-    DerivedMetricType,
+from app.analytics.models import (
     SemanticQueryPlan,
+    AggregationType,
+    OperatorType,
+    DerivedMetricType,
+    DomainEnum,
+    FilterSpec,
+    FanoutRisk,
 )
 from app.analytics.registries import (
     CAPABILITY_MATRIX,

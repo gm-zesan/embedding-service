@@ -1,145 +1,147 @@
 """
-LLM Query Planner for Business Analytics.
-Translates natural language questions (Bangla, Banglish, English) into validated AnalyticsQueryPlan.
-Does NOT generate raw SQL.
+Phase 3.x Generic Semantic Analytics Engine - Semantic Planner v2.
+Translates natural language questions into structured SemanticQueryPlan ASTs.
+Operates purely on registered semantic tokens (measures, dimensions, domains, derived metrics).
+Zero raw SQL, zero raw table names, zero hardcoded person names.
+Equipped with zero-temperature LLM execution and automatic 2-tier OpenRouter -> Direct DeepSeek failover.
 """
 
-import json
 import os
+import json
 import time
 import logging
-from typing import Dict, Any, Tuple
-# pyrefly: ignore [missing-import]
-
-logger = logging.getLogger(__name__)
+from typing import Tuple, Dict, Any, Optional
 from openai import OpenAI
-# pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 
-from app.analytics.models import AnalyticsQueryPlan
+logger = logging.getLogger(__name__)
+
+from app.analytics.models import (
+    SemanticQueryPlan,
+    DomainEnum,
+    OperatorType,
+    AggregationType,
+    TimeRangeSpec,
+    FilterSpec,
+)
 
 load_dotenv()
 
-PLANNER_SYSTEM_PROMPT = """You are an expert Analytics Query Planner for an enterprise e-commerce / business intelligence system.
-Your job is to translate natural-language business questions (in English, Bangla, or Banglish) into a structured JSON `AnalyticsQueryPlan`.
 
-CRITICAL CONSTRAINTS:
-1. You DO NOT write SQL. You ONLY output a valid JSON `AnalyticsQueryPlan` adhering strictly to the schema below.
-2. Never execute or generate raw SQL.
+PLANNER_V2_SYSTEM_PROMPT = """You are the Semantic Analytics Planner for a B2B Business Intelligence system.
+Your job is to translate natural language business questions (in English, Bengali, or Banglish) into a structured SemanticQueryPlan (AST).
 
-CORE BUSINESS DOMAINS & VOCABULARY:
-- SALES / ORDERS (`orders` entity):
-  * Keywords: sales, sale, bikri, sell, revenue, order, বিক্রি, সেলস, অর্ডার
-  * Seller role: `orders.salesperson_id` (who generated the order)
-  * Metric: `net_amount` (sum or avg), `id` (count)
-  * Common intents:
-    - `sales_summary` (aggregate sales with optional date filter: today, yesterday, last_7_days, this_month, last_month, lifetime)
-    - `salesperson_performance` (sales volume by salesperson; "sobcheye beshi sale / top seller" refers to total net_amount sales volume, sort: desc, limit: 1)
-    - `order_count` (total completed orders count)
-    - `sales_aov` (average order value)
-    - `top_order_handler` (salesperson who handled the highest count of orders, metric: id, aggregation: count)
-    - `order_count_by_salesperson` (order count for a specific salesperson)
+STRICT SECURITY & ARCHITECTURAL INVARIANTS:
+1. NEVER output raw SQL, raw table names, or raw column names.
+2. NEVER invent fields or entities. Use ONLY the registered semantic tokens below.
+3. Multi-tenant security: You NEVER decide workspace_id or tenant scope.
+4. Research purity: Treat all personal names (e.g., Hasan, Rakib, Rahim, Jamila) as runtime entity filter values, NEVER as hardcoded routing rules.
 
-- CASH-IN / COLLECTIONS / PAYMENTS (`payments` entity):
-  * Keywords: cashin, cash-in, cash in, collect, collection, payment, adai, জমা, কালেকশন, ক্যাশইন, টাকা আসল/পেলেন/তুললেন
-  * Collector role: `payments.salesperson_id` (who received/collected the payment)
-  * Metric: `amount` (sum), `id` (count)
-  * Payment methods: 'cash', 'bkash', 'nagad', 'bank', 'card'
-  * Common intents:
-    - `cash_collection` (collection amount with optional date filter: today, yesterday, last_7_days, this_month, last_month, or lifetime)
-    - `collector_performance` (total collected by salesperson / collector)
-    - `collector_ranking` (ranked list of all collectors)
-    - `top_collectors` (top N collectors)
-    - `payment_method_breakdown` (collection filtered by payment_method)
-    - `daily_collection_trend` (daily trend for last 7 days)
-    - `collection_comparison_day` (today vs yesterday collection)
+REGISTERED SEMANTIC VOCABULARY:
+- Domains:
+  * "sales": Orders, revenue, sales amounts, sales representatives, orders completed.
+  * "payments": Cash collections, payment transactions, collectors, payment methods.
+  * "due": Outstanding debt balances, customer due calculations, debt ranking.
+  * "product": Product catalog performance, quantity sold, product revenue, categories.
+  * "due_assignment": Debt recovery task assignments, agent assignments, recovery statuses.
 
-- CUSTOMER DUE / OUTSTANDING DEBT (`derived_due` entity):
-  * Keywords: due, baki, powna, outstanding, বকেয়া, বাকি, পাওনা
-  * NOTE: Dues are dynamic derived: (orders.net_amount - payments.amount). There is NO `due_amount` column in the database.
-  * Common intents:
-    - `total_due_summary` (total outstanding due across the entire company)
-    - `specific_customer_due` (due amount for a specific customer, e.g. Rahim, Karim, Jamila)
-    - `top_due_customer` (customer with the highest outstanding due)
-    - `customer_due_list` (list of customers having due, optionally with threshold filter e.g. due > 25000)
-    - `seller_customer_due_rank` (highest due customer under a specific seller)
+- Measures:
+  * "sales_amount": Total net order revenue (default agg: sum).
+  * "order_count": Count of completed orders (default agg: count).
+  * "collection_amount": Total cash collected from customers (default agg: sum).
+  * "payment_count": Count of payment transactions (default agg: count).
+  * "product_quantity": Quantity of products sold (default agg: sum).
+  * "product_revenue": Line-item revenue from product sales (default agg: sum).
+  * "active_assignment_count": Count of active due recovery assignments (default agg: count).
+  * "average_order_value": Average value per completed order (canonical derived metric).
 
-- DUE ASSIGNMENT / RECOVERY TASKS (`due_assignments` entity):
-  * Keywords: assign, assigned, recovery, daityo, দায়িত্ব, কার কাছে এসাইন, কে রিকভারি/কালেক্ট করবে, দায়িত্ব কার
-  * Assignee role: `due_assignments.assigned_salesperson_id`
-  * Common intents:
-    - `due_assignment_lookup` (which agent is assigned to collect a customer's due)
-    - `due_assignment_by_agent` (list of customers assigned to a specific recovery agent)
-    - `due_assignment_count` (count of active due assignments)
-    - `due_assignment_status` (recovery workflow status for a customer)
+- Dimensions:
+  * "salesperson": Sales representative name (seller).
+  * "customer": Customer or business client name.
+  * "product": Product item name.
+  * "category": Product category name.
+  * "payment_method": Payment channel (cash, bkash, nagad, bank, etc.).
+  * "collector": Salesperson collecting payments.
+  * "status": Order lifecycle status (completed, pending, cancelled).
+  * "assignment_status": Recovery task status (assigned, in_progress, collected, escalated).
+  * "assigned_collector": Recovery agent assigned to a customer.
+  * "order_date": Order creation date.
+  * "order_month": Order creation month (YYYY-MM). Use this for "month wise" or "মাসিক" grouping.
+  * "collected_date": Payment collection date.
 
-- PRODUCTS & CATEGORIES (`products` / `order_items` entity):
-  * Keywords: product, item, category, sold, quantity, revenue, পণ্য
-  * Common intents:
-    - `top_product_by_revenue` (highest grossing product)
-    - `top_product_by_quantity` (highest quantity product sold)
-    - `top_category_revenue` (highest grossing category)
-    - `product_quantity_lookup` (quantity sold of a specific product name)
+- Derived Metrics:
+  * "outstanding_due": Dynamic debt balance: SUM(orders) - SUM(payments).
+  * "collection_rate": (SUM(payments) / SUM(orders)) * 100.
+  * "average_order_value": SUM(sales_amount) / COUNT(orders).
+  * "period_difference": Current period value minus prior period value.
+  * "period_growth_percent": Percentage growth compared to prior period.
 
-- TIME COMPARATIVE & RANKINGS:
-  * `sales_comparison_day` (today's sales vs yesterday's sales)
-  * `sales_comparison_month` (this month's sales vs last month's sales)
-  * `top_customers_by_purchase` (top customers by total purchase volume)
+- Time Ranges:
+  * "today" -> {"type": "today"}
+  * "yesterday" -> {"type": "yesterday"}
+  * "last_7_days" -> {"type": "last_7_days"}
+  * "this_month" -> {"type": "this_month"}
+  * "last_month" -> {"type": "last_month"}
+  * "lifetime" / "all time" / "মোট" -> {"type": "lifetime"}
+  * "last_n_days" -> {"type": "last_n_days", "n_days": <int>}
+  * "custom_range" -> {"type": "custom_range", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}
 
-DATE FILTERS:
-- "আজ / today" -> {"type": "today"}
-- "গতকাল / yesterday" -> {"type": "yesterday"}
-- "গত ৭ দিন / last 7 days" -> {"type": "last_7_days"}
-- "এই মাস / this month" -> {"type": "this_month"}
-- "গত মাস / last month" -> {"type": "last_month"}
-- "সব সময় / মোট / lifetime / all time" -> {"type": "lifetime"}
+SEMANTIC DISTINCTIONS & RULES:
+1. `dimensions` vs `group_by`:
+   - If user asks for a specific person's metric:
+     e.g., "What are Hasan's sales?"
+     -> dimensions: ["salesperson"], filters: [{"field": "salesperson", "operator": "=", "value": "Hasan"}], group_by: [] (Returns a single scalar).
+   - If user asks for metrics across an entity category:
+     e.g., "Show sales of each salesperson" or "Top salespersons by revenue"
+     -> dimensions: ["salesperson"], filters: [], group_by: ["salesperson"] (Returns a table).
 
-AMBIGUITY HANDLING:
-- ONLY trigger `needs_clarification: true` when a question is genuinely underspecified and lacks the necessary context to determine what data is requested.
-  Examples of ambiguous queries:
-  * "Hasan er report dao" -> could be Hasan's sales or Hasan's collection.
-  * "Rahim er taka koto?" -> could be Rahim's purchase, paid, or due.
-  * "Ajker report dao" -> could be today's sales or today's collections.
-  For ambiguous queries:
-  {
-    "intent": "ambiguous_query",
-    "needs_clarification": true,
-    "clarification_options": ["option1", "option2"],
-    "clarification_message": "Clarification message explaining the choices"
-  }
+2. Typed Filter Value Safety:
+   - String dimensions (salesperson, customer, product, payment_method) receive string values (e.g. "Hasan", "Laptop", "bkash").
+   - Numeric measures (sales_amount, due_amount, order_count) receive numeric thresholds (e.g. 5000, 25000).
+   - NEVER place a person's name into a numeric measure filter!
 
-SECURITY & REJECTION HANDLING:
-- Database Mutations (e.g. delete, drop, truncate, update, alter, insert):
-  {
-    "intent": "unsupported_mutation",
-    "is_security_rejection": true,
-    "rejection_reason": "mutation_not_supported"
-  }
-- Out-of-domain questions (e.g. sports, cricket, weather, politics, recipes):
-  {
-    "intent": "out_of_domain",
-    "is_security_rejection": true,
-    "rejection_reason": "out_of_domain"
-  }
-- Unsupported Forecasting or Causal (e.g. "Why will sales drop next week?"):
-  {
-    "intent": "unsupported_forecasting",
-    "is_security_rejection": true,
-    "rejection_reason": "unsupported_causal_or_forecasting"
-  }
-- Read Queries with Filter Values (even containing SQL injection attempts like name = 'x' OR 1=1):
-  Do NOT reject read queries. Plan them normally as safe read queries (e.g., entity: "customers", intent: "customer_lookup", filters: [{"field": "name", "operator": "=", "value": "x' OR 1=1"}]). The deterministic backend compiler safely parameterizes all filter inputs.
+3. Due Questions:
+   - "Total due" -> domain: "due", derived_metrics: [{"type": "outstanding_due"}], group_by: []
+   - "Rahim er due koto?" -> domain: "due", derived_metrics: [{"type": "outstanding_due"}], filters: [{"field": "customer", "operator": "=", "value": "Rahim"}]
+   - "Customers with due > 20000" -> domain: "due", derived_metrics: [{"type": "outstanding_due"}], filters: [{"field": "due_amount", "operator": ">", "value": 20000}], group_by: ["customer"]
+   - "Top due customer" -> domain: "due", derived_metrics: [{"type": "outstanding_due"}], order_by: [{"field": "due_amount", "direction": "desc"}], limit: 1
+
+4. Due Assignment Questions:
+   - "Who is assigned to collect Rahim's due?" -> domain: "due_assignment", filters: [{"field": "customer", "operator": "=", "value": "Rahim"}]
+   - "How many active assignments are there?" -> domain: "due_assignment", measures: [{"name": "active_assignment_count"}]
+
+5. Ambiguity Handling:
+   - If a question is genuinely underspecified:
+     * "Hasan er report dao" (without specifying sales or collection):
+       Set: "needs_clarification": true, "clarification_options": ["Hasan's total sales", "Hasan's collections"], "clarification_message": "Did you mean Hasan's sales or cash collections?"
+     * "Rahim er taka koto?" (or "X er taka koto?" without specifying purchases, payments, or due):
+       Set: "needs_clarification": true, "clarification_options": ["total purchases", "total paid", "outstanding due"], "clarification_message": "Specify whether you want total purchases, total paid, or outstanding due."
+     * "Ajker report dao":
+       Set: "needs_clarification": true, "clarification_options": ["Today's sales", "Today's collections"], "clarification_message": "Did you mean today's sales or cash collections?"
+
+6. Special Aggregations & Groupings:
+   - Daily trends: "daily cash collection", "daily sales trend" -> group_by: ["date"], dimensions: ["date"]
+   - Top category revenue: "Kon category ... sobcheye beshi revenue / sell" -> domain: "product", measures: [{"name": "product_revenue", "aggregation": "sum"}], dimensions: ["category"], group_by: ["category"], order_by: [{"field": "product_revenue", "direction": "desc"}], limit: 1
+
+7. Security & Rejection:
+   - Prohibited Database Mutations (delete, drop, update, alter, insert, truncate):
+     Set: "is_security_rejection": true, "rejection_reason": "mutation_not_supported"
+   - Out of domain questions (weather, sports, politics, recipes):
+     Set: "is_security_rejection": true, "rejection_reason": "out_of_domain"
+   - Unsupported forecasting (why will sales drop next year):
+     Set: "is_security_rejection": true, "rejection_reason": "unsupported_causal_or_forecasting"
 
 OUTPUT JSON SCHEMA:
 {
-  "intent": "<string_intent_name>",
-  "entity": "<orders|payments|customers|salespersons|products|due_assignments|derived_due>",
-  "metrics": [{"field": "<column>", "aggregation": "<sum|count|avg|min|max>"}],
-  "dimensions": ["<column_or_role>"],
-  "filters": [{"field": "<column>", "operator": "<=|!=|>|>=|<|<=|IN|BETWEEN>", "value": "<val>"}],
-  "date_filter": {"type": "<today|yesterday|last_7_days|this_month|last_month|custom>"},
-  "sort": {"field": "<column_or_metric>", "direction": "<asc|desc>"},
-  "limit": <int or null>,
+  "domain": "sales|payments|due|product|due_assignment",
+  "measures": [{"name": "<measure_name>", "aggregation": "<sum|count|avg|min|max>"}],
+  "dimensions": [{"name": "<dimension_name>"}],
+  "filters": [{"field": "<field>", "operator": "<=|!=|>|>=|<|<=|IN|BETWEEN>", "value": <typed_value>}],
+  "group_by": ["<dimension_name>"],
+  "time_range": {"type": "<type>", "n_days": null, "start_date": null, "end_date": null},
+  "order_by": [{"field": "<field>", "direction": "asc|desc"}],
+  "limit": null,
+  "derived_metrics": [{"type": "<outstanding_due|collection_rate|average_order_value|period_difference|period_growth_percent>"}],
   "needs_clarification": false,
   "clarification_options": [],
   "clarification_message": null,
@@ -151,7 +153,12 @@ Return ONLY raw valid JSON. No explanations, no markdown code blocks.
 """
 
 
-class AnalyticsPlanner:
+class SemanticPlannerV2:
+    """
+    Translates user questions into SemanticQueryPlan ASTs with 2-tier failover
+    (OpenRouter -> Direct DeepSeek) and provider metadata tracking.
+    """
+
     def __init__(self):
         # --- LLM API Client Configuration ---
         self.primary_key = os.getenv("LLM_API_KEY") or "dummy-key-for-init"
@@ -159,17 +166,20 @@ class AnalyticsPlanner:
         self.primary_model = os.getenv("LLM_MODEL") or "deepseek-chat"
         self.primary_client = OpenAI(api_key=self.primary_key, base_url=self.primary_url)
 
-        # (Optional) Fallback configuration uses the same generically if not explicitly provided
+        # Fallback configuration uses the same generically if not explicitly provided
         self.fallback_key = os.getenv("LLM_API_KEY") or self.primary_key
         self.fallback_url = os.getenv("LLM_BASE_URL") or "https://api.deepseek.com"
         self.fallback_model = os.getenv("LLM_MODEL") or "deepseek-chat"
         self.fallback_client = OpenAI(api_key=self.fallback_key, base_url=self.fallback_url)
 
-    def _call_llm(self, client: OpenAI, model: str, question: str) -> AnalyticsQueryPlan:
+        # Circuit breaker for primary provider
+        self._primary_exhausted = False
+
+    def _call_llm(self, client: OpenAI, model: str, question: str) -> SemanticQueryPlan:
         response = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
+                {"role": "system", "content": PLANNER_V2_SYSTEM_PROMPT},
                 {"role": "user", "content": f"Business Question: {question}"},
             ],
             temperature=0.0,
@@ -180,50 +190,60 @@ class AnalyticsPlanner:
             raise ValueError("Empty choices in LLM response")
         raw_content = response.choices[0].message.content or "{}"
         plan_data = json.loads(raw_content)
-        return AnalyticsQueryPlan.model_validate(plan_data)
+        return SemanticQueryPlan.model_validate(plan_data)
 
-    def plan(self, question: str) -> Tuple[AnalyticsQueryPlan, float]:
-        """
-        Takes a natural language question and returns a validated AnalyticsQueryPlan + latency in ms.
-        Guarantees strict schema validation. Falls back to Direct DeepSeek if OpenRouter quota fails.
-        """
+    def plan(self, question: str) -> Tuple[SemanticQueryPlan, Dict[str, Any]]:
         start_time = time.perf_counter()
-        
-        # Hard Guard: Quick heuristic check for obvious mutation keywords
+        meta: Dict[str, Any] = {
+            "provider_used": "primary_llm",
+            "model": self.primary_model,
+            "fallback_triggered": False,
+            "latency_ms": 0.0,
+        }
+
+        # Fast heuristic check for prohibited mutations
         lower_q = question.lower()
         if any(bad in lower_q for bad in ["delete ", "drop table", "truncate ", "update ", "alter table", "insert into"]):
-            latency = (time.perf_counter() - start_time) * 1000.0
-            return AnalyticsQueryPlan(
-                intent="unsupported_mutation",
+            meta["latency_ms"] = (time.perf_counter() - start_time) * 1000.0
+            plan = SemanticQueryPlan(
+                domain=DomainEnum.SALES,
                 is_security_rejection=True,
                 rejection_reason="mutation_not_supported",
-            ), latency
+            )
+            return plan, meta
 
-        last_err = None
-
-        # Tier 1: Primary LLM Provider
-        try:
-            plan = self._call_llm(self.primary_client, self.primary_model, question)
-            latency = (time.perf_counter() - start_time) * 1000.0
-            return plan, latency
-        except Exception as e:
-            last_err = e
-            # Log failover notice
-            logger.warning(f"[AnalyticsPlanner] Primary provider attempt failed ({e}). Failing over to Fallback provider ({self.fallback_model})...")
+        # Tier 1: Try Primary Provider (unless circuit breaker tripped)
+        if not self._primary_exhausted:
+            try:
+                plan = self._call_llm(self.primary_client, self.primary_model, question)
+                meta["latency_ms"] = (time.perf_counter() - start_time) * 1000.0
+                return plan, meta
+            except Exception as err_tier1:
+                err_str = str(err_tier1)
+                if "402" in err_str or "credits" in err_str.lower() or "quota" in err_str.lower():
+                    self._primary_exhausted = True
+                logger.warning(
+                    f"[SemanticPlannerV2] Primary LLM provider failed ({err_tier1}). Failing over to Fallback LLM provider..."
+                )
+                meta["fallback_triggered"] = True
+                meta["provider_used"] = "fallback_llm"
+                meta["model"] = self.fallback_model
+        else:
+            meta["fallback_triggered"] = True
+            meta["provider_used"] = "fallback_llm"
+            meta["model"] = self.fallback_model
 
         # Tier 2: Fallback LLM Provider
         try:
             plan = self._call_llm(self.fallback_client, self.fallback_model, question)
-            latency = (time.perf_counter() - start_time) * 1000.0
-            return plan, latency
-        except Exception as e_fallback:
-            last_err = f"Primary: {last_err} | Fallback: {e_fallback}"
+            meta["latency_ms"] = (time.perf_counter() - start_time) * 1000.0
+            return plan, meta
+        except Exception as err_tier2:
+            meta["latency_ms"] = (time.perf_counter() - start_time) * 1000.0
+            rejection_plan = SemanticQueryPlan(
+                domain=DomainEnum.SALES,
+                is_security_rejection=True,
+                rejection_reason=f"LLM Provider Failure: {err_tier2}",
+            )
+            return rejection_plan, meta
 
-        # Pydantic or parsing error -> INVALID_PLAN
-        plan = AnalyticsQueryPlan(
-            intent="INVALID_PLAN",
-            is_security_rejection=True,
-            rejection_reason=f"LLM Provider Failure: {str(last_err)}",
-        )
-        latency = (time.perf_counter() - start_time) * 1000.0
-        return plan, latency

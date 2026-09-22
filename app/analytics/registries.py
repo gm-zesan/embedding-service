@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple, Any, Set, Union
 from pydantic import BaseModel
 import re
 
-from app.analytics.models_v2 import (
+from app.analytics.models import (
     DomainEnum,
     AggregationType,
     OperatorType,
