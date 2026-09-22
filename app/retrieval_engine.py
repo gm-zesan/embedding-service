@@ -31,10 +31,24 @@ async def expand_query_via_llm(query: str) -> Optional[str]:
         return None
 
     system_prompt = (
-        "You are an AI Search Query Expander for an enterprise multi-source customer support knowledge base. "
-        "Analyze the user's query and generate 3-5 concise, formal search keywords and synonyms in both Bengali and English "
-        "relevant to FAQ topics (e.g. refund, cancellation, delivery charges, payment methods, warranty). "
-        "Do NOT answer the question. Return ONLY comma-separated search terms."
+        "<ROLE>\n"
+        "You are an AI Search Query Expander for an enterprise multi-source customer support knowledge base.\n"
+        "</ROLE>\n\n"
+        "<TASK>\n"
+        "Analyze the user's query and generate 3-5 concise, formal search keywords and synonyms in both Bengali and English.\n"
+        "These must be highly relevant to FAQ topics (e.g. refund, cancellation, delivery charges, payment methods, warranty).\n"
+        "</TASK>\n\n"
+        "<CONSTRAINTS>\n"
+        "1. Do NOT answer the question.\n"
+        "2. Do NOT output any conversational text.\n"
+        "</CONSTRAINTS>\n\n"
+        "<EXAMPLES>\n"
+        "User: order kobe pabo?\n"
+        "Output: delivery time, kobe pabo, shipping date, delivery status, ডেলিভারি\n"
+        "</EXAMPLES>\n\n"
+        "<OUTPUT_FORMAT>\n"
+        "Return ONLY comma-separated search terms.\n"
+        "</OUTPUT_FORMAT>"
     )
 
     req = LLMRequest(
