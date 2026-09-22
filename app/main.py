@@ -48,6 +48,8 @@ from app.typesense_engine import (
     delete_faq_document,
 )
 from app.retrieval_engine import search_knowledge_base
+# pyrefly: ignore [missing-import]
+from app.analytics.router import router as analytics_router
 
 # ---------------------------------------------------------------------------
 # Request-ID logging context
@@ -119,12 +121,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Embedding & Retrieval Service",
+    title="AI Engine Service",
     version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+app.include_router(analytics_router)
 
 # ---------------------------------------------------------------------------
 # Middleware
