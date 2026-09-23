@@ -17,6 +17,9 @@ class DomainEnum(str, Enum):
     DUE = "due"
     PRODUCT = "product"
     DUE_ASSIGNMENT = "due_assignment"
+    SALESPERSON = "salesperson"
+    CUSTOMER = "customer"
+    CRM = "crm"
 
 
 class AggregationType(str, Enum):
@@ -86,6 +89,11 @@ DEFAULT_MEASURE_AGGREGATIONS = {
     "active_assignment_count": AggregationType.COUNT,
     "average_order_value": AggregationType.AVG,
     "due_amount": AggregationType.SUM,
+    "salesperson_count": AggregationType.COUNT,
+    "customer_count": AggregationType.COUNT,
+    "product_count": AggregationType.COUNT,
+    "contact_count": AggregationType.COUNT,
+    "target_amount": AggregationType.SUM,
 }
 
 
@@ -160,16 +168,7 @@ class FilterSpec(BaseModel):
 
 class TimeRangeSpec(BaseModel):
     """Structured relative or absolute temporal filter."""
-    type: Literal[
-        "today",
-        "yesterday",
-        "last_7_days",
-        "this_month",
-        "last_month",
-        "lifetime",
-        "last_n_days",
-        "custom_range",
-    ]
+    type: Optional[str] = "lifetime" 
     n_days: Optional[int] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None

@@ -28,8 +28,8 @@ from app.analytics.models import (
 load_dotenv()
 
 
-PLANNER_V2_SYSTEM_PROMPT = """You are the Semantic Analytics Planner for a B2B Business Intelligence system.
-Your job is to translate natural language business questions (in English, Bengali, or Banglish) into a structured SemanticQueryPlan (AST).
+PLANNER_V2_SYSTEM_PROMPT = """You are the Semantic Analytics Planner for a B2B Business Intelligence and Database Management system.
+Your job is to translate natural language questions (in English, Bengali, or Banglish) into a structured SemanticQueryPlan (AST).
 
 STRICT SECURITY & ARCHITECTURAL INVARIANTS:
 1. NEVER output raw SQL, raw table names, or raw column names.
@@ -41,77 +41,90 @@ STRICT SECURITY & ARCHITECTURAL INVARIANTS:
 <METRICS>
 REGISTERED SEMANTIC VOCABULARY:
 - Domains:
-  * "sales": Orders, revenue, sales amounts, sales representatives, orders completed.
-  * "payments": Cash collections, payment transactions, collectors, payment methods.
+  * "sales": Orders, gross/net revenue, order counts, salesperson performance on sales, customer purchase history.
+  * "salesperson": Sales team headcount, employee details, phone/email, sales quotas / targets.
+  * "customer": Customer registry headcount, customer profiles, address/contact directories.
+  * "product": Product catalog items, item pricing (unit_price, cost_price), categories, units sold, product revenue.
+  * "payments": Cash collections, payment transactions, collectors, payment methods (cash, bkash, nagad, bank).
   * "due": Outstanding debt balances, customer due calculations, debt ranking.
-  * "product": Product catalog performance, quantity sold, product revenue, categories.
-  * "due_assignment": Debt recovery task assignments, agent assignments, recovery statuses.
+  * "due_assignment": Debt recovery task assignments, agent assignments, recovery deadlines and statuses.
+  * "crm": CRM contacts, lead stages, contact types.
 
 - Measures:
-  * "sales_amount": Total gross sales (default agg: sum).
-  * "due_amount": Customer debt remaining (default agg: sum).
+  * "sales_amount": Total gross/net sales (default agg: sum).
+  * "order_count": Count of completed orders (default agg: count).
+  * "average_order_value": Average value per completed order (default agg: avg).
+  * "salesperson_count": Total count/headcount of sales team members (default agg: count).
+  * "customer_count": Total count/headcount of registered customers (default agg: count).
+  * "product_count": Total count of distinct products in catalog (default agg: count).
+  * "product_quantity": Total quantity of products sold in orders (default agg: sum).
+  * "product_revenue": Line-item revenue from product sales (default agg: sum).
   * "collection_amount": Total cash collected from customers (default agg: sum).
   * "payment_count": Count of payment transactions (default agg: count).
-  * "product_quantity": Quantity of products sold (default agg: sum).
-  * "product_revenue": Line-item revenue from product sales (default agg: sum).
+  * "due_amount": Outstanding debt amount (default agg: sum).
   * "active_assignment_count": Count of active due recovery assignments (default agg: count).
-  * "order_count": Count of completed orders (default agg: count).
-  * "average_order_value": Average value per completed order (canonical derived metric).
+  * "contact_count": Count of CRM contacts (default agg: count).
+  * "target_amount": Target quota amount for salespersons (default agg: sum).
+  * "unit_price": Product selling price (default agg: avg).
+  * "cost_price": Product cost price (default agg: avg).
 
-- Dimensions:
-  * "salesperson": Sales representative name (seller).
-  * "customer": Customer or business client name.
-  * "product": Product item name.
-  * "category": Product category name.
-  * "payment_method": Payment channel (cash, bkash, nagad, bank, etc.).
-  * "collector": Salesperson collecting payments.
-  * "status": Order lifecycle status (completed, pending, cancelled).
+- Dimensions (Attributes & Groupings):
+  * "salesperson": Name of sales representative.
+  * "customer": Name of customer / client.
+  * "product": Name of product catalog item.
+  * "category": Product category.
+  * "phone": Contact phone number.
+  * "email": Contact email address.
+  * "address": Customer address.
+  * "employee_code": Salesperson employee code.
+  * "payment_method": Cash, bkash, nagad, bank, etc.
+  * "transaction_ref": Payment reference code.
+  * "status": Active/inactive status or order completion status.
   * "assignment_status": Recovery task status (assigned, in_progress, collected, escalated).
-  * "assigned_collector": Recovery agent assigned to a customer.
-  * "order_date": Order creation date.
-  * "order_month": Order creation month (YYYY-MM). Use this for "month wise" or "মাসিক" grouping.
-  * "collected_date": Payment collection date.
+  * "assigned_collector": Recovery agent assigned.
+  * "order_date": Date when order was placed.
+  * "order_month": Month when order was placed.
+  * "collected_date": Date when payment was collected.
+  * "due_date": Debt recovery deadline date.
+  * "crm_stage": CRM contact stage.
+  * "crm_type": CRM contact type.
 
 - Derived Metrics:
-  * "outstanding_due": Dynamic debt balance: SUM(orders) - SUM(payments).
-  * "collection_rate": (SUM(payments) / SUM(orders)) * 100.
-  * "average_order_value": SUM(sales_amount) / COUNT(orders).
-  * "period_difference": Current period value minus prior period value.
-  * "period_growth_percent": Percentage growth compared to prior period.
+  * "outstanding_due": Cross-domain balance (sales - payments).
+  * "collection_rate": Cash collected / sales * 100.
+  * "average_order_value": sales_amount / order_count.
+  * "period_difference": Current period metric - prior period metric.
+  * "period_growth_percent": ((Current - Prior) / Prior) * 100.
 </METRICS>
 
-<TIME_RANGES>
-  * "today" -> {"type": "today"}
-  * "yesterday" -> {"type": "yesterday"}
-  * "last_7_days" -> {"type": "last_7_days"}
-  * "this_month" -> {"type": "this_month"}
-  * "last_month" -> {"type": "last_month"}
-  * "lifetime" / "all time" / "মোট" -> {"type": "lifetime"}
-  * "last_n_days" -> {"type": "last_n_days", "n_days": <int>}
-  * "custom_range" -> {"type": "custom_range", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}
-</TIME_RANGES>
-
 <RULES>
-1. `dimensions` vs `group_by`:
-   - If user asks for a specific person's metric:
-     e.g., "What are Hasan's sales?"
-     -> dimensions: ["salesperson"], filters: [{"field": "salesperson", "operator": "=", "value": "Hasan"}], group_by: [] (Returns a single scalar).
-   - If user asks for metrics across an entity category:
-     e.g., "Show sales of each salesperson" or "Top salespersons by revenue"
-     -> dimensions: ["salesperson"], filters: [], group_by: ["salesperson"] (Returns a table).
+1. Headcount & Count Questions:
+   - "total salesman koto jon?" / "sales team size" / "how many salespersons" ->
+     domain: "salesperson", measures: [{"name": "salesperson_count"}]
+   - "total customer koyjon?" / "customer count" ->
+     domain: "customer", measures: [{"name": "customer_count"}]
+   - "total product koyta?" / "catalog count" ->
+     domain: "product", measures: [{"name": "product_count"}]
+   - "total order koyta?" / "order count" ->
+     domain: "sales", measures: [{"name": "order_count"}]
 
-2. Typed Filter Value Safety:
-   - String dimensions (salesperson, customer, product, payment_method) receive string values (e.g. "Hasan", "Laptop", "bkash").
-   - Numeric measures (sales_amount, due_amount, order_count) receive numeric thresholds (e.g. 5000, 25000).
-   - NEVER place a person's name into a numeric measure filter!
+2. Directory & List Queries (GET queries):
+   - "salesman der list dao" / "sob salesman er name ki" ->
+     domain: "salesperson", dimensions: [{"name": "salesperson"}, {"name": "phone"}, {"name": "target_amount"}]
+   - "customer list dao" / "customer der address & phone dao" ->
+     domain: "customer", dimensions: [{"name": "customer"}, {"name": "phone"}, {"name": "address"}]
+   - "product list dao" / "product price list" ->
+     domain: "product", dimensions: [{"name": "product"}, {"name": "category"}, {"name": "unit_price"}]
 
-3. Due Questions:
-   - "Total due" -> domain: "due", derived_metrics: [{"type": "outstanding_due"}], group_by: []
-   - "Rahim er due koto?" -> domain: "due", derived_metrics: [{"type": "outstanding_due"}], filters: [{"field": "customer", "operator": "=", "value": "Rahim"}]
-   - "Customers with due > 20000" -> domain: "due", derived_metrics: [{"type": "outstanding_due"}], filters: [{"field": "due_amount", "operator": ">", "value": 20000}], group_by: ["customer"]
-   - "Top due customer" -> domain: "due", derived_metrics: [{"type": "outstanding_due"}], order_by: [{"field": "due_amount", "direction": "desc"}], limit: 1
+3. Sales & Financial Performance:
+   - "total sales koto?" -> domain: "sales", measures: [{"name": "sales_amount"}]
+   - "Hasan er sales koto?" -> domain: "sales", measures: [{"name": "sales_amount"}], filters: [{"field": "salesperson", "operator": "=", "value": "Hasan"}]
+   - "Hasan er target koto?" -> domain: "salesperson", measures: [{"name": "target_amount"}], filters: [{"field": "salesperson", "operator": "=", "value": "Hasan"}]
+   - "total collection koto?" -> domain: "payments", measures: [{"name": "collection_amount"}]
+   - "total due koto?" -> domain: "due", derived_metrics: [{"type": "outstanding_due"}]
+   - "top due customer ke?" -> domain: "due", derived_metrics: [{"type": "outstanding_due"}], order_by: [{"field": "due_amount", "direction": "desc"}], limit: 1
 
-4. Due Assignment Questions:
+4. Due Recovery Assignment Questions:
    - "Who is assigned to collect Rahim's due?" -> domain: "due_assignment", filters: [{"field": "customer", "operator": "=", "value": "Rahim"}]
    - "How many active assignments are there?" -> domain: "due_assignment", measures: [{"name": "active_assignment_count"}]
 
@@ -121,27 +134,18 @@ REGISTERED SEMANTIC VOCABULARY:
        Set: "needs_clarification": true, "clarification_options": ["Hasan's total sales", "Hasan's collections"], "clarification_message": "Did you mean Hasan's sales or cash collections?"
      * "Rahim er taka koto?" (or "X er taka koto?" without specifying purchases, payments, or due):
        Set: "needs_clarification": true, "clarification_options": ["total purchases", "total paid", "outstanding due"], "clarification_message": "Specify whether you want total purchases, total paid, or outstanding due."
-     * "Ajker report dao":
-       Set: "needs_clarification": true, "clarification_options": ["Today's sales", "Today's collections"], "clarification_message": "Did you mean today's sales or cash collections?"
 
-6. Special Aggregations & Groupings:
-   - Daily trends: "daily cash collection", "daily sales trend" -> group_by: ["date"], dimensions: ["date"]
-   - Top category revenue: "Kon category ... sobcheye beshi revenue / sell" -> domain: "product", measures: [{"name": "product_revenue", "aggregation": "sum"}], dimensions: ["category"], group_by: ["category"], order_by: [{"field": "product_revenue", "direction": "desc"}], limit: 1
-
-7. Security & Rejection:
+6. Security & Guardrails:
    - Prohibited Database Mutations (delete, drop, update, alter, insert, truncate):
      Set: "is_security_rejection": true, "rejection_reason": "mutation_not_supported"
    - Out of domain questions (weather, sports, politics, recipes):
      Set: "is_security_rejection": true, "rejection_reason": "out_of_domain"
-   - Unsupported forecasting (why will sales drop next year):
-     Set: "is_security_rejection": true, "rejection_reason": "unsupported_causal_or_forecasting"
 </RULES>
 
 <OUTPUT_SCHEMA>
 ONLY return raw valid JSON matching this exact structure:
 {
-  "thought_process": "Briefly explain your step-by-step reasoning for building this specific AST.",
-  "domain": "sales|payments|due|product|due_assignment",
+  "domain": "sales|salesperson|customer|product|payments|due|due_assignment|crm",
   "measures": [{"name": "<measure_name>", "aggregation": "<sum|count|avg|min|max>"}],
   "dimensions": [{"name": "<dimension_name>"}],
   "filters": [{"field": "<field>", "operator": "<=|!=|>|>=|<|<=|IN|BETWEEN>", "value": <typed_value>}],
@@ -169,19 +173,16 @@ class SemanticPlannerV2:
     """
 
     def __init__(self):
-        # --- LLM API Client Configuration ---
         self.primary_key = os.getenv("LLM_API_KEY") or "dummy-key-for-init"
         self.primary_url = os.getenv("LLM_BASE_URL") or "https://api.deepseek.com"
-        self.primary_model = os.getenv("LLM_MODEL") or "deepseek-flash"
+        self.primary_model = os.getenv("LLM_MODEL") or "deepseek-chat"
         self.primary_client = OpenAI(api_key=self.primary_key, base_url=self.primary_url)
 
-        # Fallback configuration uses the same generically if not explicitly provided
         self.fallback_key = os.getenv("LLM_API_KEY") or self.primary_key
         self.fallback_url = os.getenv("LLM_BASE_URL") or "https://api.deepseek.com"
-        self.fallback_model = os.getenv("LLM_MODEL") or "deepseek-flash"
+        self.fallback_model = os.getenv("LLM_MODEL") or "deepseek-chat"
         self.fallback_client = OpenAI(api_key=self.fallback_key, base_url=self.fallback_url)
 
-        # Circuit breaker for primary provider
         self._primary_exhausted = False
 
     def _call_llm(self, client: OpenAI, model: str, question: str) -> SemanticQueryPlan:
@@ -192,13 +193,18 @@ class SemanticPlannerV2:
                 {"role": "user", "content": f"Business Question: {question}"},
             ],
             temperature=0.0,
-            max_tokens=1000,
+            max_tokens=2048,
             response_format={"type": "json_object"},
+            extra_body={"thinking": {"type": "disabled"}}
         )
         if not response or not response.choices:
             raise ValueError("Empty choices in LLM response")
         raw_content = response.choices[0].message.content or "{}"
-        plan_data = json.loads(raw_content)
+        try:
+            plan_data = json.loads(raw_content)
+        except Exception as e:
+            logger.error(f"[SemanticPlannerV2] JSONDecodeError: {e}. Raw content: {raw_content}")
+            raise
         return SemanticQueryPlan.model_validate(plan_data)
 
     def plan(self, question: str) -> Tuple[SemanticQueryPlan, Dict[str, Any]]:
@@ -221,7 +227,6 @@ class SemanticPlannerV2:
             )
             return plan, meta
 
-        # Tier 1: Try Primary Provider (unless circuit breaker tripped)
         if not self._primary_exhausted:
             try:
                 plan = self._call_llm(self.primary_client, self.primary_model, question)
@@ -242,7 +247,6 @@ class SemanticPlannerV2:
             meta["provider_used"] = "fallback_llm"
             meta["model"] = self.fallback_model
 
-        # Tier 2: Fallback LLM Provider
         try:
             plan = self._call_llm(self.fallback_client, self.fallback_model, question)
             meta["latency_ms"] = (time.perf_counter() - start_time) * 1000.0
@@ -255,4 +259,3 @@ class SemanticPlannerV2:
                 rejection_reason=f"LLM Provider Failure: {err_tier2}",
             )
             return rejection_plan, meta
-

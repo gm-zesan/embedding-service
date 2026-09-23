@@ -2,7 +2,7 @@
 Phase 3.x Generic Semantic Analytics Engine - Deterministic SQL Compiler v2.
 Compiles validated SemanticQueryPlan into parameterized, safe MySQL statements.
 Enforces multi-tenant workspace isolation (workspace_id = ?), grain pre-aggregation,
-and zero Cartesian fanout joins.
+and zero Cartesian fanout joins across ALL database tables and business entities.
 """
 
 from collections.abc import Set
@@ -45,7 +45,7 @@ class AnalyticsCompilerV2:
     @staticmethod
     def _compile_time_range(time_range: Optional[TimeRangeSpec], date_col: str) -> Tuple[str, List[Any]]:
         """Compiles TimeRangeSpec into parameterized SQL fragment."""
-        if not time_range:
+        if not time_range or not date_col:
             return "", []
 
         t_type = time_range.type
@@ -81,45 +81,269 @@ class AnalyticsCompilerV2:
         Main compilation pipeline.
         Returns: (parameterized_sql, params_list)
         """
-        # 1. Guard against unhandled clarification or security rejections
         if plan.needs_clarification or plan.is_security_rejection:
             return "", []
 
-        # 2. Validate plan and run grain analysis
         val_res = SemanticValidator.validate(plan)
         if not val_res.is_valid:
             raise CompilerError(f"Plan failed semantic validation: {'; '.join(val_res.errors)}")
 
         grain_info = val_res.grain_analysis or SemanticValidator.analyze_grain(plan)
 
-        # 3. Route to specialized domain compiler
-        # Branch A: DUE domain or OUTSTANDING_DUE metric
+        # 1. DUE Domain / OUTSTANDING_DUE metric
         if plan.domain == DomainEnum.DUE or any(
             dm.type == DerivedMetricType.OUTSTANDING_DUE for dm in plan.derived_metrics
         ):
             return self._compile_due_query(plan, workspace_id, grain_info)
 
-        # Branch B: Period Comparisons (Growth / Difference)
+        # 2. Period Comparisons
         if any(
             dm.type in (DerivedMetricType.PERIOD_DIFFERENCE, DerivedMetricType.PERIOD_GROWTH_PERCENT)
             for dm in plan.derived_metrics
         ):
             return self._compile_comparison_query(plan, workspace_id)
 
-        # Branch C: DUE_ASSIGNMENT domain
+        # 3. DUE_ASSIGNMENT Domain
         if plan.domain == DomainEnum.DUE_ASSIGNMENT:
             return self._compile_due_assignment_query(plan, workspace_id)
 
-        # Branch D: Standard Aggregation (SALES, PAYMENTS, PRODUCT)
+        # 4. SALESPERSON Domain
+        if plan.domain == DomainEnum.SALESPERSON:
+            return self._compile_salesperson_domain_query(plan, workspace_id)
+
+        # 5. CUSTOMER Domain
+        if plan.domain == DomainEnum.CUSTOMER:
+            return self._compile_customer_domain_query(plan, workspace_id)
+
+        # 6. CRM Domain
+        if plan.domain == DomainEnum.CRM:
+            return self._compile_crm_domain_query(plan, workspace_id)
+
+        # 7. Standard Queries (SALES, PAYMENTS, PRODUCT)
         return self._compile_standard_query(plan, workspace_id, grain_info)
 
-    # -----------------------------------------------------------------
-    # Branch A: DUE Domain (Pre-Aggregated CTEs / Clean Outer Merge)
-    # -----------------------------------------------------------------
+    def _compile_salesperson_domain_query(self, plan: SemanticQueryPlan, workspace_id: int) -> Tuple[str, List[Any]]:
+        params: List[Any] = [workspace_id]
+        where_clauses: List[str] = ["s.workspace_id = ?"]
+        select_items: List[str] = []
+        group_items: List[str] = []
+
+        for f in plan.filters:
+            if f.field in ("salesperson", "name"):
+                where_clauses.append("s.name = ?")
+                params.append(f.value)
+            elif f.field == "employee_code":
+                where_clauses.append("s.employee_code = ?")
+                params.append(f.value)
+            elif f.field == "phone":
+                where_clauses.append("s.phone = ?")
+                params.append(f.value)
+            elif f.field == "status":
+                where_clauses.append("s.is_active = ?")
+                params.append(1 if f.value in (1, "1", "active", True) else 0)
+
+        has_measures = bool(plan.measures)
+        has_group = bool(plan.group_by)
+
+        if has_group:
+            for g in plan.group_by:
+                if g == "salesperson":
+                    select_items.append("s.name AS salesperson")
+                    group_items.append("s.name")
+                elif g == "status":
+                    select_items.append("CASE WHEN s.is_active = 1 THEN 'active' ELSE 'inactive' END AS status")
+                    group_items.append("s.is_active")
+                elif g == "employee_code":
+                    select_items.append("s.employee_code AS employee_code")
+                    group_items.append("s.employee_code")
+
+        if has_measures:
+            for m in plan.measures:
+                m_alias = m.alias or m.name
+                if m.name == "salesperson_count":
+                    select_items.append(f"COUNT(s.id) AS {m_alias}")
+                elif m.name == "target_amount":
+                    if m.aggregation == AggregationType.AVG:
+                        select_items.append(f"ROUND(COALESCE(AVG(s.target_amount), 0), 2) AS {m_alias}")
+                    else:
+                        select_items.append(f"COALESCE(SUM(s.target_amount), 0) AS {m_alias}")
+        elif not has_group:
+            if plan.dimensions:
+                for d in plan.dimensions:
+                    if d.name in ("salesperson", "name"):
+                        select_items.append("s.name AS salesperson")
+                    elif d.name == "phone":
+                        select_items.append("s.phone AS phone")
+                    elif d.name == "email":
+                        select_items.append("s.email AS email")
+                    elif d.name == "employee_code":
+                        select_items.append("s.employee_code AS employee_code")
+                    elif d.name == "target_amount":
+                        select_items.append("s.target_amount AS target_amount")
+                    elif d.name == "status":
+                        select_items.append("CASE WHEN s.is_active = 1 THEN 'active' ELSE 'inactive' END AS status")
+            else:
+                select_items = ["s.id", "s.name AS salesperson", "s.phone", "s.email", "s.employee_code", "s.target_amount"]
+
+        if not select_items:
+            select_items = ["COUNT(s.id) AS salesperson_count"]
+
+        sql_parts = [
+            f"SELECT {', '.join(select_items)}",
+            "FROM analytics_salespersons s",
+            f"WHERE {' AND '.join(where_clauses)}",
+        ]
+        if group_items:
+            sql_parts.append(f"GROUP BY {', '.join(group_items)}")
+
+        if plan.order_by:
+            ob_parts = [f"{ob.field} {ob.direction.upper()}" for ob in plan.order_by]
+            sql_parts.append(f"ORDER BY {', '.join(ob_parts)}")
+        elif not has_measures and not has_group:
+            sql_parts.append("ORDER BY s.name ASC")
+
+        if plan.limit:
+            sql_parts.append(f"LIMIT {plan.limit}")
+
+        return " ".join(sql_parts) + ";", params
+
+    def _compile_customer_domain_query(self, plan: SemanticQueryPlan, workspace_id: int) -> Tuple[str, List[Any]]:
+        params: List[Any] = [workspace_id]
+        where_clauses: List[str] = ["c.workspace_id = ?"]
+        select_items: List[str] = []
+        group_items: List[str] = []
+
+        for f in plan.filters:
+            if f.field in ("customer", "name"):
+                where_clauses.append("c.name = ?")
+                params.append(f.value)
+            elif f.field == "phone":
+                where_clauses.append("c.phone = ?")
+                params.append(f.value)
+            elif f.field == "address":
+                where_clauses.append("c.address LIKE ?")
+                params.append(f"%{f.value}%")
+            elif f.field == "status":
+                where_clauses.append("c.is_active = ?")
+                params.append(1 if f.value in (1, "1", "active", True) else 0)
+
+        has_measures = bool(plan.measures)
+        has_group = bool(plan.group_by)
+
+        if has_group:
+            for g in plan.group_by:
+                if g == "customer":
+                    select_items.append("c.name AS customer")
+                    group_items.append("c.name")
+                elif g == "status":
+                    select_items.append("CASE WHEN c.is_active = 1 THEN 'active' ELSE 'inactive' END AS status")
+                    group_items.append("c.is_active")
+                elif g == "address":
+                    select_items.append("c.address AS address")
+                    group_items.append("c.address")
+
+        if has_measures:
+            for m in plan.measures:
+                m_alias = m.alias or m.name
+                if m.name == "customer_count":
+                    select_items.append(f"COUNT(c.id) AS {m_alias}")
+        elif not has_group:
+            if plan.dimensions:
+                for d in plan.dimensions:
+                    if d.name in ("customer", "name"):
+                        select_items.append("c.name AS customer")
+                    elif d.name == "phone":
+                        select_items.append("c.phone AS phone")
+                    elif d.name == "email":
+                        select_items.append("c.email AS email")
+                    elif d.name == "address":
+                        select_items.append("c.address AS address")
+                    elif d.name == "status":
+                        select_items.append("CASE WHEN c.is_active = 1 THEN 'active' ELSE 'inactive' END AS status")
+            else:
+                select_items = ["c.id", "c.name AS customer", "c.phone", "c.email", "c.address"]
+
+        if not select_items:
+            select_items = ["COUNT(c.id) AS customer_count"]
+
+        sql_parts = [
+            f"SELECT {', '.join(select_items)}",
+            "FROM analytics_customers c",
+            f"WHERE {' AND '.join(where_clauses)}",
+        ]
+        if group_items:
+            sql_parts.append(f"GROUP BY {', '.join(group_items)}")
+
+        if plan.order_by:
+            ob_parts = [f"{ob.field} {ob.direction.upper()}" for ob in plan.order_by]
+            sql_parts.append(f"ORDER BY {', '.join(ob_parts)}")
+        elif not has_measures and not has_group:
+            sql_parts.append("ORDER BY c.name ASC")
+
+        if plan.limit:
+            sql_parts.append(f"LIMIT {plan.limit}")
+
+        return " ".join(sql_parts) + ";", params
+
+    def _compile_crm_domain_query(self, plan: SemanticQueryPlan, workspace_id: int) -> Tuple[str, List[Any]]:
+        params: List[Any] = [workspace_id]
+        where_clauses: List[str] = ["crm.workspace_id = ?"]
+        select_items: List[str] = []
+        group_items: List[str] = []
+
+        for f in plan.filters:
+            if f.field in ("customer", "name"):
+                where_clauses.append("crm.name = ?")
+                params.append(f.value)
+            elif f.field == "phone":
+                where_clauses.append("crm.phone = ?")
+                params.append(f.value)
+            elif f.field == "crm_stage":
+                where_clauses.append("crm.stage = ?")
+                params.append(f.value)
+            elif f.field == "crm_type":
+                where_clauses.append("crm.type = ?")
+                params.append(f.value)
+
+        has_measures = bool(plan.measures)
+        has_group = bool(plan.group_by)
+
+        if has_group:
+            for g in plan.group_by:
+                if g == "crm_stage":
+                    select_items.append("crm.stage AS crm_stage")
+                    group_items.append("crm.stage")
+                elif g == "crm_type":
+                    select_items.append("crm.type AS crm_type")
+                    group_items.append("crm.type")
+                elif g == "status":
+                    select_items.append("crm.status AS status")
+                    group_items.append("crm.status")
+
+        if has_measures:
+            select_items.append("COUNT(crm.id) AS contact_count")
+        elif not has_group:
+            select_items = ["crm.id", "crm.name AS contact_name", "crm.type", "crm.stage", "crm.status"]
+
+        if not select_items:
+            select_items = ["COUNT(crm.id) AS contact_count"]
+
+        sql_parts = [
+            f"SELECT {', '.join(select_items)}",
+            "FROM crm_contacts crm",
+            f"WHERE {' AND '.join(where_clauses)}",
+        ]
+        if group_items:
+            sql_parts.append(f"GROUP BY {', '.join(group_items)}")
+
+        if plan.limit:
+            sql_parts.append(f"LIMIT {plan.limit}")
+
+        return " ".join(sql_parts) + ";", params
+
     def _compile_due_query(
         self, plan: SemanticQueryPlan, workspace_id: int, grain_info: GrainAnalysisResult
     ) -> Tuple[str, List[Any]]:
-        # A1: Specific Customer Due Lookup (Customer Filter Present)
         cust_filter = next((f for f in plan.filters if f.field in ("customer", "customer_name")), None)
         if cust_filter:
             sql = (
@@ -131,7 +355,6 @@ class AnalyticsCompilerV2:
             )
             return sql, [workspace_id, cust_filter.value]
 
-        # A2: Salesperson-specific Customer Due (e.g. Hasan's customers' due)
         sp_filter = next((f for f in plan.filters if f.field in ("salesperson", "seller")), None)
         if sp_filter:
             limit_clause = f" LIMIT {plan.limit}" if plan.limit else ""
@@ -147,100 +370,58 @@ class AnalyticsCompilerV2:
             sp_name = sp_filter.value
             return sql, [sp_name, workspace_id, workspace_id, sp_name, workspace_id]
 
-        # A3: Global Scalar Due
-        if grain_info.primary_grain == "global_scalar":
+        if not plan.group_by:
             sql = (
-                "SELECT ( "
-                "(SELECT COALESCE(SUM(net_amount), 0) FROM analytics_orders WHERE workspace_id = ? AND status = 'completed') - "
-                "(SELECT COALESCE(SUM(amount), 0) FROM analytics_payments WHERE workspace_id = ?) "
-                ") AS total_outstanding_due;"
+                "SELECT ("
+                "COALESCE((SELECT SUM(net_amount) FROM analytics_orders WHERE workspace_id = ? AND status = 'completed'), 0) - "
+                "COALESCE((SELECT SUM(amount) FROM analytics_payments WHERE workspace_id = ?), 0)"
+                ") AS total_due;"
             )
             return sql, [workspace_id, workspace_id]
-
-        # A4: General Customer Due List (with optional threshold, sort, and limit)
-        # Check threshold filter on due_amount or sales_amount
-        threshold = 0.0
-        thresh_filter = next(
-            (f for f in plan.filters if f.field in ("due_amount", "outstanding_due", "amount")), None
-        )
-        if thresh_filter:
-            try:
-                threshold = float(thresh_filter.value)
-            except (ValueError, TypeError):
-                threshold = 0.0
 
         limit_clause = f" LIMIT {plan.limit}" if plan.limit else ""
-        
-        # Single top customer lookup
-        if plan.limit == 1:
-            sql = (
-                "SELECT c.id, c.name, ( "
-                "COALESCE((SELECT SUM(o.net_amount) FROM analytics_orders o WHERE o.customer_id = c.id AND o.status = 'completed'), 0) - "
-                "COALESCE((SELECT SUM(p.amount) FROM analytics_payments p WHERE p.customer_id = c.id), 0) "
-                ") AS due_amount "
-                "FROM analytics_customers c WHERE c.workspace_id = ? "
-                f"ORDER BY due_amount DESC{limit_clause};"
-            )
-            return sql, [workspace_id]
-
-        # Multi-row customer due list
         sql = (
-            "SELECT c.name, ( "
-            "COALESCE((SELECT SUM(o.net_amount) FROM analytics_orders o WHERE o.customer_id = c.id AND o.status = 'completed'), 0) - "
-            "COALESCE((SELECT SUM(p.amount) FROM analytics_payments p WHERE p.customer_id = c.id), 0) "
-            ") AS due_amount "
-            f"FROM analytics_customers c WHERE c.workspace_id = ? HAVING due_amount > ? ORDER BY due_amount DESC{limit_clause};"
+            "WITH orders_cte AS ("
+            "    SELECT customer_id, SUM(net_amount) AS total_orders "
+            "    FROM analytics_orders WHERE workspace_id = ? AND status = 'completed' "
+            "    GROUP BY customer_id"
+            "), "
+            "payments_cte AS ("
+            "    SELECT customer_id, SUM(amount) AS total_payments "
+            "    FROM analytics_payments WHERE workspace_id = ? "
+            "    GROUP BY customer_id"
+            ") "
+            "SELECT c.id, c.name, "
+            "COALESCE(o.total_orders, 0) - COALESCE(p.total_payments, 0) AS due_amount "
+            "FROM analytics_customers c "
+            "LEFT JOIN orders_cte o ON o.customer_id = c.id "
+            "LEFT JOIN payments_cte p ON p.customer_id = c.id "
+            "WHERE c.workspace_id = ? AND (COALESCE(o.total_orders, 0) - COALESCE(p.total_payments, 0)) > 0 "
+            f"ORDER BY due_amount DESC{limit_clause};"
         )
-        return sql, [workspace_id, threshold]
+        return sql, [workspace_id, workspace_id, workspace_id]
 
-    # -----------------------------------------------------------------
-    # Branch B: Period Comparisons (Temporal Difference / Growth)
-    # -----------------------------------------------------------------
-    def _compile_comparison_query(
-        self, plan: SemanticQueryPlan, workspace_id: int
-    ) -> Tuple[str, List[Any]]:
-        # Cash Collection day comparison
-        if plan.domain == DomainEnum.PAYMENTS or any("collection" in m.name for m in plan.measures):
-            sql = (
-                "SELECT (SELECT COALESCE(SUM(amount), 0) FROM analytics_payments WHERE workspace_id = ? AND DATE(collected_at) = CURRENT_DATE()) AS today_coll, "
-                "(SELECT COALESCE(SUM(amount), 0) FROM analytics_payments WHERE workspace_id = ? AND DATE(collected_at) = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)) AS yest_coll;"
-            )
-            return sql, [workspace_id, workspace_id]
-
-        # Sales Day comparison (today vs yesterday)
-        is_day_comp = plan.time_range and plan.time_range.type in ("today", "yesterday")
-        if is_day_comp or not plan.time_range:
-            sql = (
-                "SELECT ( "
-                "(SELECT COALESCE(SUM(net_amount), 0) FROM analytics_orders WHERE workspace_id = ? AND order_date = CURRENT_DATE() AND status = 'completed') - "
-                "(SELECT COALESCE(SUM(net_amount), 0) FROM analytics_orders WHERE workspace_id = ? AND order_date = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY) AND status = 'completed') "
-                ") AS sales_difference;"
-            )
-            return sql, [workspace_id, workspace_id]
-
-        # Month comparison (this month vs prior month)
-        sql = (
-            "SELECT ( "
-            "(SELECT COALESCE(SUM(net_amount), 0) FROM analytics_orders WHERE workspace_id = ? AND MONTH(order_date) = MONTH(CURRENT_DATE()) AND status = 'completed') - "
-            "(SELECT COALESCE(SUM(net_amount), 0) FROM analytics_orders WHERE workspace_id = ? AND order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 45 DAY) AND order_date < DATE_SUB(CURRENT_DATE(), INTERVAL 25 DAY) AND status = 'completed') "
-            ") AS monthly_growth;"
+    def _compile_comparison_query(self, plan: SemanticQueryPlan, workspace_id: int) -> Tuple[str, List[Any]]:
+        return (
+            "SELECT "
+            "COALESCE(SUM(CASE WHEN order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY) THEN net_amount ELSE 0 END), 0) AS current_period_sales, "
+            "COALESCE(SUM(CASE WHEN order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 60 DAY) AND order_date < DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY) THEN net_amount ELSE 0 END), 0) AS prior_period_sales, "
+            "ROUND(((COALESCE(SUM(CASE WHEN order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY) THEN net_amount ELSE 0 END), 0) - "
+            "COALESCE(SUM(CASE WHEN order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 60 DAY) AND order_date < DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY) THEN net_amount ELSE 0 END), 0)) / "
+            "NULLIF(COALESCE(SUM(CASE WHEN order_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 60 DAY) AND order_date < DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY) THEN net_amount ELSE 0 END), 0), 0)) * 100, 2) AS period_growth_percent "
+            "FROM analytics_orders WHERE workspace_id = ? AND status = 'completed';",
+            [workspace_id],
         )
-        return sql, [workspace_id, workspace_id]
 
-    # -----------------------------------------------------------------
-    # Branch C: DUE_ASSIGNMENT Domain
-    # -----------------------------------------------------------------
     def _compile_due_assignment_query(
         self, plan: SemanticQueryPlan, workspace_id: int
     ) -> Tuple[str, List[Any]]:
         params: List[Any] = [workspace_id]
-
         agent_filter = next(
             (f for f in plan.filters if f.field in ("salesperson", "collector", "assigned_collector")),
             None,
         )
 
-        # Active count by agent
         if any(m.name == "active_assignment_count" for m in plan.measures) and agent_filter:
             sql = (
                 "SELECT COUNT(*) AS active_assignments FROM analytics_due_assignments a "
@@ -249,7 +430,6 @@ class AnalyticsCompilerV2:
             )
             return sql, [workspace_id, agent_filter.value]
 
-        # Active count total
         if any(m.name == "active_assignment_count" for m in plan.measures) and not plan.dimensions:
             sql = (
                 "SELECT COUNT(*) AS active_assignments FROM analytics_due_assignments "
@@ -257,7 +437,6 @@ class AnalyticsCompilerV2:
             )
             return sql, params
 
-        # Lookup by agent / collector
         if agent_filter:
             sql = (
                 "SELECT DISTINCT c.name FROM analytics_due_assignments a "
@@ -267,7 +446,6 @@ class AnalyticsCompilerV2:
             )
             return sql, [workspace_id, agent_filter.value]
 
-        # Lookup by customer
         cust_filter = next((f for f in plan.filters if f.field in ("customer", "name")), None)
         if cust_filter:
             sql = (
@@ -279,7 +457,6 @@ class AnalyticsCompilerV2:
             )
             return sql, [workspace_id, cust_filter.value]
 
-        # Default fallback
         sql = (
             "SELECT s.name AS assigned_collector, c.name AS customer_name, a.status "
             "FROM analytics_due_assignments a "
@@ -289,40 +466,62 @@ class AnalyticsCompilerV2:
         )
         return sql, params
 
-    # -----------------------------------------------------------------
-    # Branch D: Standard Aggregations (SALES, PAYMENTS, PRODUCT)
-    # -----------------------------------------------------------------
     def _compile_standard_query(
         self, plan: SemanticQueryPlan, workspace_id: int, grain_info: GrainAnalysisResult
     ) -> Tuple[str, List[Any]]:
-        # D1: Entity Lookups (e.g. Customer listing / lookup without measures)
-        if not plan.measures and not plan.derived_metrics:
-            if any(d.name == "customer" for d in plan.dimensions):
-                cust_filter = next((f for f in plan.filters if f.field in ("customer", "name")), None)
-                if cust_filter:
-                    return (
-                        "SELECT id, name FROM analytics_customers WHERE workspace_id = ? AND name = ?;",
-                        [workspace_id, cust_filter.value],
-                    )
-                else:
-                    return (
-                        "SELECT id, name FROM analytics_customers WHERE workspace_id = ? ORDER BY name ASC;",
-                        [workspace_id],
-                    )
-            if any(d.name in ("salesperson", "collector") for d in plan.dimensions):
-                sp_filter = next((f for f in plan.filters if f.field in ("salesperson", "collector", "name")), None)
-                if sp_filter:
-                    return (
-                        "SELECT id, name FROM analytics_salespersons WHERE workspace_id = ? AND name = ?;",
-                        [workspace_id, sp_filter.value],
-                    )
-                else:
-                    return (
-                        "SELECT id, name FROM analytics_salespersons WHERE workspace_id = ? ORDER BY name ASC;",
-                        [workspace_id],
-                    )
+        # Product catalog price / count queries without orders
+        if plan.domain == DomainEnum.PRODUCT and not any(m.name in ("product_quantity", "product_revenue") for m in plan.measures):
+            params: List[Any] = [workspace_id]
+            where_clauses: List[str] = ["pr.workspace_id = ?"]
+            select_items: List[str] = []
+            group_items: List[str] = []
 
-        # D2: Salesperson-specific Total Sales / Collection / Order Count
+            for f in plan.filters:
+                if f.field in ("product", "name"):
+                    where_clauses.append("pr.name = ?")
+                    params.append(f.value)
+                elif f.field == "category":
+                    where_clauses.append("pr.category = ?")
+                    params.append(f.value)
+
+            has_measures = bool(plan.measures)
+            has_group = bool(plan.group_by)
+
+            if has_group:
+                for g in plan.group_by:
+                    if g == "product":
+                        select_items.append("pr.name AS product")
+                        group_items.append("pr.name")
+                    elif g == "category":
+                        select_items.append("pr.category AS category")
+                        group_items.append("pr.category")
+
+            if has_measures:
+                for m in plan.measures:
+                    m_alias = m.alias or m.name
+                    if m.name == "product_count":
+                        select_items.append(f"COUNT(pr.id) AS {m_alias}")
+                    elif m.name == "unit_price":
+                        select_items.append(f"ROUND(AVG(pr.unit_price), 2) AS {m_alias}")
+                    elif m.name == "cost_price":
+                        select_items.append(f"ROUND(AVG(pr.cost_price), 2) AS {m_alias}")
+            elif not has_group:
+                select_items = ["pr.id", "pr.name AS product", "pr.category", "pr.unit_price", "pr.cost_price"]
+
+            if not select_items:
+                select_items = ["COUNT(pr.id) AS product_count"]
+
+            sql_parts = [
+                f"SELECT {', '.join(select_items)}",
+                "FROM analytics_products pr",
+                f"WHERE {' AND '.join(where_clauses)}",
+            ]
+            if group_items:
+                sql_parts.append(f"GROUP BY {', '.join(group_items)}")
+            if plan.limit:
+                sql_parts.append(f"LIMIT {plan.limit}")
+            return " ".join(sql_parts) + ";", params
+
         sp_filter = next((f for f in plan.filters if f.field in ("salesperson", "collector", "salesperson_name", "collector_name")), None)
         if sp_filter and not plan.group_by and (not plan.time_range or plan.time_range.type == "lifetime") and not any(f.field in ("product", "category") for f in plan.filters):
             sp_name = sp_filter.value
@@ -382,45 +581,12 @@ class AnalyticsCompilerV2:
                     )
                     return sql, [workspace_id, sp_name]
 
-        # D3: Collector Ranking (includes agents with 0 collection)
-        if any(g in ("collector", "salesperson") for g in plan.group_by) and (not plan.time_range or plan.time_range.type == "lifetime") and not plan.filters:
-            limit_clause = f" LIMIT {plan.limit}" if plan.limit else ""
-            if plan.domain == DomainEnum.PAYMENTS:
-                sql = (
-                    "SELECT s.id, s.name, COALESCE(SUM(p.amount), 0) AS total_collected "
-                    "FROM analytics_salespersons s "
-                    "LEFT JOIN analytics_payments p ON p.salesperson_id = s.id "
-                    f"WHERE s.workspace_id = ? GROUP BY s.id, s.name ORDER BY total_collected DESC{limit_clause};"
-                )
-                return sql, [workspace_id]
-            elif plan.domain == DomainEnum.SALES:
-                sql = (
-                    "SELECT s.id, s.name, COALESCE(SUM(o.net_amount), 0) AS total_sales "
-                    "FROM analytics_salespersons s "
-                    "LEFT JOIN analytics_orders o ON o.salesperson_id = s.id AND o.status = 'completed' "
-                    f"WHERE s.workspace_id = ? GROUP BY s.id, s.name ORDER BY total_sales DESC{limit_clause};"
-                )
-                return sql, [workspace_id]
+        params = []
+        where_clauses = []
+        joins = []
+        select_items = []
+        group_items = []
 
-        # D4: Product Quantity Lookup for single product
-        prod_filter = next((f for f in plan.filters if f.field in ("product", "product_name")), None)
-        if prod_filter and not plan.group_by and not any(f.field in ("salesperson", "collector") for f in plan.filters) and (not plan.time_range or plan.time_range.type == "lifetime"):
-            sql = (
-                "SELECT pr.name, COALESCE(SUM(oi.quantity), 0) AS total_sold "
-                "FROM analytics_products pr "
-                "LEFT JOIN analytics_order_items oi ON oi.product_id = pr.id "
-                "LEFT JOIN analytics_orders o ON o.id = oi.order_id AND o.status = 'completed' "
-                "WHERE pr.workspace_id = ? AND pr.name = ? GROUP BY pr.id, pr.name;"
-            )
-            return sql, [workspace_id, prod_filter.value]
-
-        params: List[Any] = []
-        where_clauses: List[str] = []
-        joins: List[str] = []
-        select_items: List[str] = []
-        group_items: List[str] = []
-
-        # 1. Determine Base Table & Aliases
         if plan.domain == DomainEnum.PAYMENTS:
             base_table = "analytics_payments"
             base_alias = "p"
@@ -432,7 +598,6 @@ class AnalyticsCompilerV2:
             date_col = "o.order_date"
             default_scope = "o.status = 'completed'"
         else:  # SALES
-            # If query references product measures, base is order_items joined to orders
             needs_items = any(
                 m.name in ("product_quantity", "product_revenue") for m in plan.measures
             ) or any(
@@ -451,33 +616,24 @@ class AnalyticsCompilerV2:
                 date_col = "o.order_date"
                 default_scope = "o.status = 'completed'"
 
-        # Always isolate by workspace_id
-        if base_alias == "oi":
-            # analytics_order_items is isolated via analytics_orders (o.workspace_id = ?)
-            pass
-        else:
+        if base_alias != "oi":
             where_clauses.append(f"{base_alias}.workspace_id = ?")
             params.append(workspace_id)
 
-        # 2. Add Default Scope Filter
         if default_scope and not any(f.field == "status" for f in plan.filters):
             where_clauses.append(default_scope)
 
-        # 3. Resolve Joins
         joined_tables: Set[str] = {base_table}
 
-        # Need orders table joined if base is order_items
         if base_alias == "oi" and "analytics_orders" not in joined_tables:
             joins.append("JOIN analytics_orders o ON o.id = oi.order_id AND o.workspace_id = ?")
             params.append(workspace_id)
             joined_tables.add("analytics_orders")
 
-        # Check dimension / filter dependencies
         referenced_fields = set(d.name for d in plan.dimensions)
         referenced_fields.update(plan.group_by)
         referenced_fields.update(f.field for f in plan.filters)
 
-        # Salesperson join
         if "salesperson" in referenced_fields or "collector" in referenced_fields:
             if base_alias in ("o", "oi"):
                 joins.append("JOIN analytics_salespersons s ON s.id = o.salesperson_id AND s.workspace_id = ?")
@@ -487,7 +643,6 @@ class AnalyticsCompilerV2:
                 params.append(workspace_id)
             joined_tables.add("analytics_salespersons")
 
-        # Customer join
         if "customer" in referenced_fields:
             if base_alias in ("o", "oi"):
                 joins.append("JOIN analytics_customers c ON c.id = o.customer_id AND c.workspace_id = ?")
@@ -497,15 +652,12 @@ class AnalyticsCompilerV2:
                 params.append(workspace_id)
             joined_tables.add("analytics_customers")
 
-        # Product join
         if "product" in referenced_fields or "category" in referenced_fields:
             if base_alias == "oi":
                 joins.append("JOIN analytics_products pr ON pr.id = oi.product_id AND pr.workspace_id = ?")
                 params.append(workspace_id)
                 joined_tables.add("analytics_products")
 
-        # 4. Compile Projections & Group By
-        # Group By dimensions
         for g in plan.group_by:
             if g in ("salesperson", "collector"):
                 select_items.append("s.name AS salesperson")
@@ -526,10 +678,9 @@ class AnalyticsCompilerV2:
                 select_items.append(f"DATE({date_col}) AS {g}")
                 group_items.append(f"DATE({date_col})")
             elif g == "order_month":
-                select_items.append(f"DATE_FORMAT({date_col}, '%%Y-%%m') AS {g}")
-                group_items.append(f"DATE_FORMAT({date_col}, '%%Y-%%m')")
+                select_items.append(f"DATE_FORMAT({date_col}, '%Y-%m') AS {g}")
+                group_items.append(f"DATE_FORMAT({date_col}, '%Y-%m')")
 
-        # Measures
         for m in plan.measures:
             m_alias = m.alias or m.name
             if m.name == "sales_amount":
@@ -541,6 +692,10 @@ class AnalyticsCompilerV2:
             elif m.name == "order_count":
                 col = "o.id" if base_alias in ("o", "oi") else "id"
                 select_items.append(f"COUNT(DISTINCT {col}) AS {m_alias}")
+            elif m.name == "salesperson_count":
+                select_items.append(f"COUNT(DISTINCT o.salesperson_id) AS {m_alias}")
+            elif m.name == "customer_count":
+                select_items.append(f"COUNT(DISTINCT o.customer_id) AS {m_alias}")
             elif m.name == "collection_amount":
                 select_items.append(f"COALESCE(SUM(p.amount), 0) AS {m_alias}")
             elif m.name == "payment_count":
@@ -553,52 +708,41 @@ class AnalyticsCompilerV2:
                 col = "o.net_amount"
                 select_items.append(f"ROUND(COALESCE(AVG({col}), 0), 2) AS {m_alias}")
 
-        # Derived metrics (e.g. AVERAGE_ORDER_VALUE)
         for dm in plan.derived_metrics:
             if dm.type == DerivedMetricType.AVERAGE_ORDER_VALUE:
                 alias = dm.alias or "average_order_value"
                 col = "o.net_amount"
                 select_items.append(f"ROUND(COALESCE(AVG({col}), 0), 2) AS {alias}")
 
-        # If select_items is empty, add fallback scalar
         if not select_items:
             select_items.append("COALESCE(SUM(net_amount), 0) AS total_value")
 
-        # 5. Compile Temporal Filter
         time_sql, time_params = self._compile_time_range(plan.time_range, date_col)
         if time_sql:
             where_clauses.append(time_sql)
             params.extend(time_params)
 
-        # 6. Compile User Filters
         for f in plan.filters:
-            # Salesperson
             if f.field in ("salesperson", "collector"):
                 where_clauses.append("s.name = ?")
                 params.append(f.value)
-            # Customer
             elif f.field == "customer":
                 where_clauses.append("c.name = ?")
                 params.append(f.value)
-            # Product
             elif f.field == "product":
                 where_clauses.append("pr.name = ?")
                 params.append(f.value)
-            # Category
             elif f.field == "category":
                 where_clauses.append("pr.category = ?")
                 params.append(f.value)
-            # Payment Method
             elif f.field == "payment_method":
                 where_clauses.append("p.payment_method = ?")
                 params.append(f.value)
-            # Order status
             elif f.field == "status":
                 col = "o.status" if base_alias in ("o", "oi") else "status"
                 where_clauses.append(f"{col} = ?")
                 params.append(f.value)
 
-        # Build complete SQL string
         sql_parts = [
             f"SELECT {', '.join(select_items)}",
             f"FROM {base_table} {base_alias}",
@@ -610,24 +754,17 @@ class AnalyticsCompilerV2:
         if group_items:
             sql_parts.append(f"GROUP BY {', '.join(group_items)}")
 
-        # Order By
         if plan.order_by:
-            ob_clauses = []
-            for ob in plan.order_by:
-                direction = ob.direction.upper()
-                ob_clauses.append(f"{ob.field} {direction}")
+            ob_clauses = [f"{ob.field} {ob.direction.upper()}" for ob in plan.order_by]
             sql_parts.append(f"ORDER BY {', '.join(ob_clauses)}")
         elif group_items:
-            # Default sort by date ascending if grouped by date, else by primary measure descending
             if any("date" in g.lower() or "collected_at" in g.lower() for g in group_items):
                 sql_parts.append("ORDER BY 1 ASC")
             else:
                 first_m = plan.measures[0].name if plan.measures else "sales_amount"
                 sql_parts.append(f"ORDER BY {first_m} DESC")
 
-        # Limit
         if plan.limit:
             sql_parts.append(f"LIMIT {plan.limit}")
 
-        sql = " ".join(sql_parts) + ";"
-        return sql, params
+        return " ".join(sql_parts) + ";", params

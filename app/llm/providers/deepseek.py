@@ -8,7 +8,7 @@ logger = logging.getLogger("llm.deepseek")
 
 
 class DeepSeekProvider(BaseLLMProvider):
-    def __init__(self, api_key: str, base_url: Optional[str] = None, default_model: str = "deepseek-flash"):
+    def __init__(self, api_key: str, base_url: Optional[str] = None, default_model: str = "deepseek-chat"):
         self.api_key = api_key
         self.base_url = (base_url or "https://api.deepseek.com/v1").rstrip("/")
         self.default_model = default_model

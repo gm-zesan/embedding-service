@@ -1,7 +1,7 @@
 """
 Phase 3.x Generic Semantic Analytics Engine - Semantic Registries & Capability Matrix.
 Provides central catalog for measures, dimensions, relationships, derived metrics,
-grain analysis rules, and typed field validation.
+grain analysis rules, and typed field validation across ALL business tables.
 """
 
 from typing import Dict, List, Optional, Tuple, Any, Set, Union
@@ -42,7 +42,7 @@ class DimensionDefinition(BaseModel):
     source_table: str
     id_column: str
     label_column: str
-    data_type: str  # "string", "date", "integer"
+    data_type: str  # "string", "date", "integer", "numeric"
     description: str
 
 
@@ -77,6 +77,7 @@ class DerivedMetricDefinition(BaseModel):
 # 1. MEASURE REGISTRY
 # =====================================================================
 MEASURE_REGISTRY: Dict[str, MeasureDefinition] = {
+    # --- Sales Domain ---
     "sales_amount": MeasureDefinition(
         name="sales_amount",
         domain=DomainEnum.SALES,
@@ -107,6 +108,19 @@ MEASURE_REGISTRY: Dict[str, MeasureDefinition] = {
         data_type="integer",
         description="Count of completed orders",
     ),
+    "average_order_value": MeasureDefinition(
+        name="average_order_value",
+        domain=DomainEnum.SALES,
+        source_table="analytics_orders",
+        source_column="net_amount",
+        default_aggregation=AggregationType.AVG,
+        allowed_aggregations=[AggregationType.AVG],
+        default_scope_filter="status = 'completed'",
+        data_type="currency",
+        description="Average order value (canonical derived: SUM(sales_amount) / COUNT(order_count))",
+    ),
+
+    # --- Payments Domain ---
     "collection_amount": MeasureDefinition(
         name="collection_amount",
         domain=DomainEnum.PAYMENTS,
@@ -136,6 +150,19 @@ MEASURE_REGISTRY: Dict[str, MeasureDefinition] = {
         default_scope_filter=None,
         data_type="integer",
         description="Count of individual payment transactions",
+    ),
+
+    # --- Product Catalog & Performance Domain ---
+    "product_count": MeasureDefinition(
+        name="product_count",
+        domain=DomainEnum.PRODUCT,
+        source_table="analytics_products",
+        source_column="id",
+        default_aggregation=AggregationType.COUNT,
+        allowed_aggregations=[AggregationType.COUNT, AggregationType.COUNT_DISTINCT],
+        default_scope_filter=None,
+        data_type="integer",
+        description="Count of distinct products in catalog",
     ),
     "product_quantity": MeasureDefinition(
         name="product_quantity",
@@ -169,28 +196,45 @@ MEASURE_REGISTRY: Dict[str, MeasureDefinition] = {
         data_type="currency",
         description="Total line item revenue from products",
     ),
-    "active_assignment_count": MeasureDefinition(
-        name="active_assignment_count",
-        domain=DomainEnum.DUE_ASSIGNMENT,
-        source_table="analytics_due_assignments",
+
+    # --- Salesperson / Staff Domain ---
+    "salesperson_count": MeasureDefinition(
+        name="salesperson_count",
+        domain=DomainEnum.SALESPERSON,
+        source_table="analytics_salespersons",
         source_column="id",
         default_aggregation=AggregationType.COUNT,
-        allowed_aggregations=[AggregationType.COUNT],
-        default_scope_filter="status IN ('assigned', 'in_progress')",
+        allowed_aggregations=[AggregationType.COUNT, AggregationType.COUNT_DISTINCT],
+        default_scope_filter=None,
         data_type="integer",
-        description="Total count of active due recovery assignments",
+        description="Headcount of sales team members",
     ),
-    "average_order_value": MeasureDefinition(
-        name="average_order_value",
-        domain=DomainEnum.SALES,
-        source_table="analytics_orders",
-        source_column="net_amount",
-        default_aggregation=AggregationType.AVG,
-        allowed_aggregations=[AggregationType.AVG],
-        default_scope_filter="status = 'completed'",
+    "target_amount": MeasureDefinition(
+        name="target_amount",
+        domain=DomainEnum.SALESPERSON,
+        source_table="analytics_salespersons",
+        source_column="target_amount",
+        default_aggregation=AggregationType.SUM,
+        allowed_aggregations=[AggregationType.SUM, AggregationType.AVG, AggregationType.MIN, AggregationType.MAX],
+        default_scope_filter=None,
         data_type="currency",
-        description="Average order value (canonical derived: SUM(sales_amount) / COUNT(order_count))",
+        description="Total sales quota target amount",
     ),
+
+    # --- Customer Domain ---
+    "customer_count": MeasureDefinition(
+        name="customer_count",
+        domain=DomainEnum.CUSTOMER,
+        source_table="analytics_customers",
+        source_column="id",
+        default_aggregation=AggregationType.COUNT,
+        allowed_aggregations=[AggregationType.COUNT, AggregationType.COUNT_DISTINCT],
+        default_scope_filter=None,
+        data_type="integer",
+        description="Headcount of registered customers",
+    ),
+
+    # --- Due & Recovery Domain ---
     "due_amount": MeasureDefinition(
         name="due_amount",
         domain=DomainEnum.DUE,
@@ -202,6 +246,30 @@ MEASURE_REGISTRY: Dict[str, MeasureDefinition] = {
         data_type="currency",
         description="Alias for outstanding due amount",
     ),
+    "active_assignment_count": MeasureDefinition(
+        name="active_assignment_count",
+        domain=DomainEnum.DUE_ASSIGNMENT,
+        source_table="analytics_due_assignments",
+        source_column="id",
+        default_aggregation=AggregationType.COUNT,
+        allowed_aggregations=[AggregationType.COUNT],
+        default_scope_filter="status IN ('assigned', 'in_progress')",
+        data_type="integer",
+        description="Total count of active due recovery assignments",
+    ),
+
+    # --- CRM Domain ---
+    "contact_count": MeasureDefinition(
+        name="contact_count",
+        domain=DomainEnum.CRM,
+        source_table="crm_contacts",
+        source_column="id",
+        default_aggregation=AggregationType.COUNT,
+        allowed_aggregations=[AggregationType.COUNT],
+        default_scope_filter=None,
+        data_type="integer",
+        description="Total count of CRM contacts",
+    ),
 }
 
 
@@ -209,24 +277,67 @@ MEASURE_REGISTRY: Dict[str, MeasureDefinition] = {
 # 2. DIMENSION REGISTRY
 # =====================================================================
 DIMENSION_REGISTRY: Dict[str, DimensionDefinition] = {
+    # Salesperson / Staff
     "salesperson": DimensionDefinition(
         name="salesperson",
-        domain=DomainEnum.SALES,
+        domain=DomainEnum.SALESPERSON,
         source_table="analytics_salespersons",
         id_column="id",
         label_column="name",
         data_type="string",
         description="Sales representative or field officer name",
     ),
+    "employee_code": DimensionDefinition(
+        name="employee_code",
+        domain=DomainEnum.SALESPERSON,
+        source_table="analytics_salespersons",
+        id_column="employee_code",
+        label_column="employee_code",
+        data_type="string",
+        description="Employee ID or identification code",
+    ),
+
+    # Customer
     "customer": DimensionDefinition(
         name="customer",
-        domain=DomainEnum.SALES,
+        domain=DomainEnum.CUSTOMER,
         source_table="analytics_customers",
         id_column="id",
         label_column="name",
         data_type="string",
         description="Customer or business client name",
     ),
+    "address": DimensionDefinition(
+        name="address",
+        domain=DomainEnum.CUSTOMER,
+        source_table="analytics_customers",
+        id_column="address",
+        label_column="address",
+        data_type="string",
+        description="Customer physical address or location",
+    ),
+
+    # Contact Info (Shared across Salesperson / Customer / CRM)
+    "phone": DimensionDefinition(
+        name="phone",
+        domain=DomainEnum.CUSTOMER,
+        source_table="analytics_customers",
+        id_column="phone",
+        label_column="phone",
+        data_type="string",
+        description="Phone number or mobile contact",
+    ),
+    "email": DimensionDefinition(
+        name="email",
+        domain=DomainEnum.CUSTOMER,
+        source_table="analytics_customers",
+        id_column="email",
+        label_column="email",
+        data_type="string",
+        description="Email address",
+    ),
+
+    # Product Catalog
     "product": DimensionDefinition(
         name="product",
         domain=DomainEnum.PRODUCT,
@@ -245,6 +356,26 @@ DIMENSION_REGISTRY: Dict[str, DimensionDefinition] = {
         data_type="string",
         description="Product classification category",
     ),
+    "unit_price": DimensionDefinition(
+        name="unit_price",
+        domain=DomainEnum.PRODUCT,
+        source_table="analytics_products",
+        id_column="unit_price",
+        label_column="unit_price",
+        data_type="numeric",
+        description="Product selling unit price",
+    ),
+    "cost_price": DimensionDefinition(
+        name="cost_price",
+        domain=DomainEnum.PRODUCT,
+        source_table="analytics_products",
+        id_column="cost_price",
+        label_column="cost_price",
+        data_type="numeric",
+        description="Product wholesale cost price",
+    ),
+
+    # Payments & Transactions
     "payment_method": DimensionDefinition(
         name="payment_method",
         domain=DomainEnum.PAYMENTS,
@@ -253,6 +384,15 @@ DIMENSION_REGISTRY: Dict[str, DimensionDefinition] = {
         label_column="payment_method",
         data_type="string",
         description="Payment channel: cash, bank, bkash, nagad, etc.",
+    ),
+    "transaction_ref": DimensionDefinition(
+        name="transaction_ref",
+        domain=DomainEnum.PAYMENTS,
+        source_table="analytics_payments",
+        id_column="transaction_ref",
+        label_column="transaction_ref",
+        data_type="string",
+        description="Transaction or payment reference code",
     ),
     "collector": DimensionDefinition(
         name="collector",
@@ -263,6 +403,17 @@ DIMENSION_REGISTRY: Dict[str, DimensionDefinition] = {
         data_type="string",
         description="Sales representative collecting payment",
     ),
+
+    # Order Details
+    "order_number": DimensionDefinition(
+        name="order_number",
+        domain=DomainEnum.SALES,
+        source_table="analytics_orders",
+        id_column="order_number",
+        label_column="order_number",
+        data_type="string",
+        description="Unique order invoice code",
+    ),
     "status": DimensionDefinition(
         name="status",
         domain=DomainEnum.SALES,
@@ -270,8 +421,10 @@ DIMENSION_REGISTRY: Dict[str, DimensionDefinition] = {
         id_column="status",
         label_column="status",
         data_type="string",
-        description="Order status: completed, pending, cancelled",
+        description="Entity or transaction status",
     ),
+
+    # Due Recovery
     "assignment_status": DimensionDefinition(
         name="assignment_status",
         domain=DomainEnum.DUE_ASSIGNMENT,
@@ -290,6 +443,17 @@ DIMENSION_REGISTRY: Dict[str, DimensionDefinition] = {
         data_type="string",
         description="Assigned debt recovery agent",
     ),
+    "notes": DimensionDefinition(
+        name="notes",
+        domain=DomainEnum.DUE_ASSIGNMENT,
+        source_table="analytics_due_assignments",
+        id_column="notes",
+        label_column="notes",
+        data_type="string",
+        description="Notes and descriptions",
+    ),
+
+    # Dates
     "order_date": DimensionDefinition(
         name="order_date",
         domain=DomainEnum.SALES,
@@ -316,6 +480,35 @@ DIMENSION_REGISTRY: Dict[str, DimensionDefinition] = {
         label_column="collected_at",
         data_type="date",
         description="Date when payment was recorded",
+    ),
+    "due_date": DimensionDefinition(
+        name="due_date",
+        domain=DomainEnum.DUE_ASSIGNMENT,
+        source_table="analytics_due_assignments",
+        id_column="due_date",
+        label_column="due_date",
+        data_type="date",
+        description="Expected payment deadline date",
+    ),
+
+    # CRM
+    "crm_stage": DimensionDefinition(
+        name="crm_stage",
+        domain=DomainEnum.CRM,
+        source_table="crm_contacts",
+        id_column="stage",
+        label_column="stage",
+        data_type="string",
+        description="CRM contact lead stage",
+    ),
+    "crm_type": DimensionDefinition(
+        name="crm_type",
+        domain=DomainEnum.CRM,
+        source_table="crm_contacts",
+        id_column="type",
+        label_column="type",
+        data_type="string",
+        description="CRM contact type",
     ),
 }
 
@@ -514,6 +707,8 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
             "sales_amount",
             "order_count",
             "average_order_value",
+            "salesperson_count",
+            "customer_count",
         },
         "dimensions": {
             "salesperson",
@@ -522,7 +717,10 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
             "category",
             "order_date",
             "order_month",
+            "order_number",
             "status",
+            "phone",
+            "email",
         },
         "group_by": {
             "salesperson",
@@ -531,12 +729,81 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
             "category",
             "order_date",
             "order_month",
+            "order_number",
+            "status",
         },
         "derived_metrics": {
             "average_order_value",
             "period_difference",
             "period_growth_percent",
         },
+    },
+    DomainEnum.SALESPERSON: {
+        "measures": {
+            "salesperson_count",
+            "target_amount",
+            "sales_amount",
+            "order_count",
+        },
+        "dimensions": {
+            "salesperson",
+            "phone",
+            "email",
+            "employee_code",
+            "target_amount",
+            "status",
+        },
+        "group_by": {
+            "salesperson",
+            "status",
+            "employee_code",
+        },
+        "derived_metrics": set(),
+    },
+    DomainEnum.CUSTOMER: {
+        "measures": {
+            "customer_count",
+            "due_amount",
+            "sales_amount",
+            "order_count",
+        },
+        "dimensions": {
+            "customer",
+            "phone",
+            "email",
+            "address",
+            "status",
+        },
+        "group_by": {
+            "customer",
+            "status",
+            "address",
+        },
+        "derived_metrics": {
+            "outstanding_due",
+        },
+    },
+    DomainEnum.PRODUCT: {
+        "measures": {
+            "product_count",
+            "product_quantity",
+            "product_revenue",
+            "unit_price",
+            "cost_price",
+        },
+        "dimensions": {
+            "product",
+            "category",
+            "unit_price",
+            "cost_price",
+            "status",
+        },
+        "group_by": {
+            "product",
+            "category",
+            "status",
+        },
+        "derived_metrics": set(),
     },
     DomainEnum.PAYMENTS: {
         "measures": {
@@ -548,7 +815,9 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
             "salesperson",
             "customer",
             "payment_method",
+            "transaction_ref",
             "collected_date",
+            "status",
         },
         "group_by": {
             "collector",
@@ -556,27 +825,30 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
             "customer",
             "payment_method",
             "collected_date",
+            "status",
         },
         "derived_metrics": {
+            "collection_rate",
             "period_difference",
             "period_growth_percent",
         },
     },
     DomainEnum.DUE: {
         "measures": {
+            "due_amount",
             "sales_amount",
             "collection_amount",
-            "outstanding_due",
-            "due_amount",
+            "customer_count",
         },
         "dimensions": {
             "customer",
-            "assigned_collector",
             "salesperson",
+            "status",
+            "phone",
+            "address",
         },
         "group_by": {
             "customer",
-            "assigned_collector",
             "salesperson",
         },
         "derived_metrics": {
@@ -584,42 +856,45 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
             "collection_rate",
         },
     },
-    DomainEnum.PRODUCT: {
-        "measures": {
-            "product_quantity",
-            "product_revenue",
-            "sales_amount",
-        },
-        "dimensions": {
-            "product",
-            "category",
-            "salesperson",
-            "customer",
-        },
-        "group_by": {
-            "product",
-            "category",
-        },
-        "derived_metrics": {
-            "period_difference",
-            "period_growth_percent",
-        },
-    },
     DomainEnum.DUE_ASSIGNMENT: {
         "measures": {
             "active_assignment_count",
+            "due_amount",
         },
         "dimensions": {
-            "customer",
             "assigned_collector",
-            "status",
+            "salesperson",
+            "customer",
             "assignment_status",
+            "status",
+            "due_date",
+            "notes",
         },
         "group_by": {
             "assigned_collector",
-            "status",
-            "assignment_status",
+            "salesperson",
             "customer",
+            "assignment_status",
+            "due_date",
+        },
+        "derived_metrics": set(),
+    },
+    DomainEnum.CRM: {
+        "measures": {
+            "contact_count",
+        },
+        "dimensions": {
+            "customer",
+            "phone",
+            "email",
+            "status",
+            "crm_stage",
+            "crm_type",
+        },
+        "group_by": {
+            "crm_stage",
+            "crm_type",
+            "status",
         },
         "derived_metrics": set(),
     },
@@ -627,7 +902,7 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
 
 
 # =====================================================================
-# 6. FIELD DATA TYPE MAPPING (For Typed Filter Value Validation)
+# 6. FIELD DATA TYPES FOR TYPED FILTER VALIDATION
 # =====================================================================
 FIELD_TYPE_REGISTRY: Dict[str, str] = {
     # Numeric Measures
@@ -641,6 +916,14 @@ FIELD_TYPE_REGISTRY: Dict[str, str] = {
     "outstanding_due": "numeric",
     "due_amount": "numeric",
     "average_order_value": "numeric",
+    "salesperson_count": "numeric",
+    "customer_count": "numeric",
+    "product_count": "numeric",
+    "contact_count": "numeric",
+    "target_amount": "numeric",
+    "unit_price": "numeric",
+    "cost_price": "numeric",
+
     # String Dimensions
     "salesperson": "string",
     "customer": "string",
@@ -651,9 +934,21 @@ FIELD_TYPE_REGISTRY: Dict[str, str] = {
     "status": "string",
     "assignment_status": "string",
     "assigned_collector": "string",
+    "phone": "string",
+    "email": "string",
+    "address": "string",
+    "employee_code": "string",
+    "order_number": "string",
+    "transaction_ref": "string",
+    "notes": "string",
+    "crm_stage": "string",
+    "crm_type": "string",
+
     # Date Dimensions
     "order_date": "date",
+    "order_month": "string",
     "collected_date": "date",
+    "due_date": "date",
 }
 
 
@@ -699,7 +994,6 @@ def get_fanout_risk(source_entity: str, target_entity: str) -> FanoutRisk:
 def validate_filter_value_type(field: str, operator: OperatorType, value: Any) -> Tuple[bool, Optional[str]]:
     """
     Validates that a filter's value matches the registered semantic data type of the field.
-    Prevents invalid queries (e.g. sales_amount > 'Hasan') from reaching the compiler.
     """
     expected_type = FIELD_TYPE_REGISTRY.get(field)
     if not expected_type:
@@ -760,7 +1054,6 @@ def validate_filter_value_type(field: str, operator: OperatorType, value: Any) -
 
     # 3. Date Field Validation
     if expected_type == "date":
-        date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
         if operator == OperatorType.BETWEEN:
             if not isinstance(value, (list, tuple)) or len(value) != 2:
                 return False, f"BETWEEN operator on '{field}' requires 2 date strings, got {value}"

@@ -16,6 +16,13 @@ class AnalyticsFormatter:
     def format_currency(amount: float) -> str:
         return f"৳{amount:,.2f}"
 
+    @classmethod
+    def is_monetary_field(cls, key: str) -> bool:
+        lower = key.lower()
+        if any(non_money in lower for non_money in ["count", "quantity", "qty", "phone", "code", "id", "status"]):
+            return False
+        return any(money in lower for money in ["amount", "sales", "revenue", "due", "collected", "collection", "price", "target", "cost", "total_value"])
+
     def format(
         self,
         question: str,
@@ -51,21 +58,20 @@ class AnalyticsFormatter:
                 f"*(Latency: {latency_ms:.1f}ms)*"
             )
 
-        # 4. Single Value Summary (e.g., Total Cash-in, Total Due, Total Orders)
+        # 4. Single Value Summary (e.g., Total Cash-in, Total Due, Total Orders, Headcounts)
         first_row = results[0]
         if len(results) == 1 and len(first_row) <= 2:
-            # Check for currency keys
             output_lines = [f"📊 **Business Analytics Summary**\n"]
             for k, v in first_row.items():
                 label = k.replace("_", " ").title()
-                if isinstance(v, (int, float)) and ("amount" in k or "total" in k or "sales" in k or "due" in k or "collected" in k or "cash" in k):
+                if isinstance(v, (int, float)) and self.is_monetary_field(k):
                     output_lines.append(f"- **{label}:** {self.format_currency(float(v))}")
                 else:
                     output_lines.append(f"- **{label}:** {v}")
             output_lines.append(f"\n*(Latency: {latency_ms:.1f}ms)*")
             return "\n".join(output_lines)
 
-        # 5. Tabular / Multi-row Report (e.g., Customer Due List, Salesperson Ranking)
+        # 5. Tabular / Multi-row Report (e.g., Customer Due List, Salesperson Ranking, Product List)
         headers = list(first_row.keys())
         header_row = "| " + " | ".join([h.replace("_", " ").title() for h in headers]) + " |"
         sep_row = "| " + " | ".join(["---"] * len(headers)) + " |"
@@ -75,7 +81,7 @@ class AnalyticsFormatter:
             row_vals = []
             for h in headers:
                 val = r.get(h, "")
-                if isinstance(val, (int, float)) and ("amount" in h or "total" in h or "sales" in h or "due" in h or "collected" in h):
+                if isinstance(val, (int, float)) and self.is_monetary_field(h):
                     row_vals.append(self.format_currency(float(val)))
                 else:
                     row_vals.append(str(val))

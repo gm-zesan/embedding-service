@@ -108,10 +108,27 @@ def handle_analytics_query(req: AnalyticsQueryRequest):
         # 3. Semantic Validation
         val_res = validator.validate_plan(plan)
         if not val_res.is_valid:
-            logger.error(f"[Phase 3.x] Semantic validation failed: {val_res.errors}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Semantic validation failed: {val_res.errors}",
+            logger.warning(f"[Phase 3.x] Semantic validation failed: {val_res.errors}")
+            error_details = "\n".join(f"- {err}" for err in val_res.errors)
+            report = (
+                f"ℹ️ **Query Interpretation Notice**\n\n"
+                f"Could not compute analytics for: *\"{query}\"*\n\n"
+                f"**Reason:**\n{error_details}\n\n"
+                f"*Please ask a question relating to supported metrics like sales amount, orders count, cash collections, or outstanding dues.*"
+            )
+            total_latency = round((time.perf_counter() - t_start) * 1000.0, 2)
+            return AnalyticsQueryResponse(
+                success=True,
+                intent="validation_notice",
+                report=report,
+                sql=None,
+                rows=[],
+                is_security_rejection=False,
+                is_ambiguous=False,
+                latency_ms=total_latency,
+                engine="v2_semantic",
+                provider_used=meta.get("provider_used"),
+                fallback_triggered=meta.get("fallback_triggered", False),
             )
 
         # 4. Deterministic SQL Compilation
@@ -160,6 +177,8 @@ def handle_analytics_query(req: AnalyticsQueryRequest):
             engine="v2_semantic",
             fallback_triggered=False,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"[Phase 3.x] Pipeline failed: {e}", exc_info=True)
         raise HTTPException(
