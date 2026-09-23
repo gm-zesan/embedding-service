@@ -35,6 +35,7 @@ class AnalyticsQueryRequest(BaseModel):
     query: str = Field(..., description="Natural language business intelligence question")
     workspace_id: int = Field(..., description="Authenticated multi-tenant workspace context")
     engine: Literal["semantic"] = Field("semantic", description="Engine to use")
+    history: Optional[List[Dict[str, str]]] = Field(default=None, description="Recent conversation turns")
 
 
 class AnalyticsQueryResponse(BaseModel):
@@ -68,7 +69,7 @@ def handle_analytics_query(req: AnalyticsQueryRequest):
     # Primary Pipeline: Phase 3.x Generic Semantic Analytics Engine
     # -------------------------------------------------------------
     try:
-        plan, meta = planner.plan(query)
+        plan, meta = planner.plan(query, history=req.history)
         llm_latency = meta.get("latency_ms", 0.0)
 
         # 1. Early Security Rejection

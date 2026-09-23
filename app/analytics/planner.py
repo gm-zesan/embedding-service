@@ -109,8 +109,10 @@ REGISTERED SEMANTIC VOCABULARY:
      domain: "sales", measures: [{"name": "order_count"}]
 
 2. Directory & List Queries (GET queries):
-   - "salesman der list dao" / "sob salesman er name ki" ->
-     domain: "salesperson", dimensions: [{"name": "salesperson"}, {"name": "phone"}, {"name": "target_amount"}]
+   - "salesman der list dao" / "sob salesman er name ki" / "nam ki tader?" ->
+     domain: "salesperson", dimensions: [{"name": "salesperson"}]
+   - "tader phone number dao" / "salesman der phone dao" ->
+     domain: "salesperson", dimensions: [{"name": "salesperson"}, {"name": "phone"}]
    - "customer list dao" / "customer der address & phone dao" ->
      domain: "customer", dimensions: [{"name": "customer"}, {"name": "phone"}, {"name": "address"}]
    - "product list dao" / "product price list" ->
@@ -185,13 +187,38 @@ class SemanticPlannerV2:
 
         self._primary_exhausted = False
 
-    def _call_llm(self, client: OpenAI, model: str, question: str) -> SemanticQueryPlan:
+    def _clean_history_text(self, text: str) -> str:
+        lines = [line.strip().strip("|").strip("-").strip("*").strip(">") for line in text.splitlines()]
+        clean = " ".join([l for l in lines if l and not l.startswith("---") and not "Latency:" in l and not "Question:" in l])
+        return clean[:160]
+
+    def _build_messages(self, question: str, history: Optional[list] = None) -> list:
+        context_lines = []
+        if history:
+            for item in history[-4:]:
+                role = item.get("role", "user")
+                text = item.get("content", "")
+                if text:
+                    clean_text = self._clean_history_text(text) if role == "assistant" else text.strip()[:160]
+                    if clean_text:
+                        label = "User" if role == "user" else "Assistant"
+                        context_lines.append(f"{label}: {clean_text}")
+
+        if context_lines:
+            ctx_str = "\n".join(context_lines)
+            user_content = f"<RECENT_CONVERSATION_CONTEXT>\n{ctx_str}\n</RECENT_CONVERSATION_CONTEXT>\n\nBusiness Question: {question}"
+        else:
+            user_content = f"Business Question: {question}"
+
+        return [
+            {"role": "system", "content": PLANNER_V2_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ]
+
+    def _call_llm(self, client: OpenAI, model: str, messages: list) -> SemanticQueryPlan:
         response = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "system", "content": PLANNER_V2_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Business Question: {question}"},
-            ],
+            messages=messages,
             temperature=0.0,
             max_tokens=2048,
             response_format={"type": "json_object"},
@@ -201,13 +228,19 @@ class SemanticPlannerV2:
             raise ValueError("Empty choices in LLM response")
         raw_content = response.choices[0].message.content or "{}"
         try:
-            plan_data = json.loads(raw_content)
+            json_start = raw_content.find("{")
+            json_end = raw_content.rfind("}")
+            if json_start != -1 and json_end != -1:
+                clean_json = raw_content[json_start:json_end + 1]
+            else:
+                clean_json = raw_content.strip()
+            plan_data = json.loads(clean_json)
         except Exception as e:
             logger.error(f"[SemanticPlannerV2] JSONDecodeError: {e}. Raw content: {raw_content}")
             raise
         return SemanticQueryPlan.model_validate(plan_data)
 
-    def plan(self, question: str) -> Tuple[SemanticQueryPlan, Dict[str, Any]]:
+    def plan(self, question: str, history: Optional[list] = None) -> Tuple[SemanticQueryPlan, Dict[str, Any]]:
         start_time = time.perf_counter()
         meta: Dict[str, Any] = {
             "provider_used": "primary_llm",
@@ -227,9 +260,11 @@ class SemanticPlannerV2:
             )
             return plan, meta
 
+        messages = self._build_messages(question, history)
+
         if not self._primary_exhausted:
             try:
-                plan = self._call_llm(self.primary_client, self.primary_model, question)
+                plan = self._call_llm(self.primary_client, self.primary_model, messages)
                 meta["latency_ms"] = (time.perf_counter() - start_time) * 1000.0
                 return plan, meta
             except Exception as err_tier1:
@@ -248,7 +283,7 @@ class SemanticPlannerV2:
             meta["model"] = self.fallback_model
 
         try:
-            plan = self._call_llm(self.fallback_client, self.fallback_model, question)
+            plan = self._call_llm(self.fallback_client, self.fallback_model, messages)
             meta["latency_ms"] = (time.perf_counter() - start_time) * 1000.0
             return plan, meta
         except Exception as err_tier2:

@@ -156,6 +156,15 @@ class AnalyticsCompilerV2:
                 elif g == "employee_code":
                     select_items.append("s.employee_code AS employee_code")
                     group_items.append("s.employee_code")
+                elif g == "phone":
+                    select_items.append("s.phone AS phone")
+                    group_items.append("s.phone")
+                elif g == "email":
+                    select_items.append("s.email AS email")
+                    group_items.append("s.email")
+                elif g == "target_amount":
+                    select_items.append("s.target_amount AS target_amount")
+                    group_items.append("s.target_amount")
 
         if has_measures:
             for m in plan.measures:
@@ -241,6 +250,12 @@ class AnalyticsCompilerV2:
                 elif g == "address":
                     select_items.append("c.address AS address")
                     group_items.append("c.address")
+                elif g == "phone":
+                    select_items.append("c.phone AS phone")
+                    group_items.append("c.phone")
+                elif g == "email":
+                    select_items.append("c.email AS email")
+                    group_items.append("c.email")
 
         if has_measures:
             for m in plan.measures:
