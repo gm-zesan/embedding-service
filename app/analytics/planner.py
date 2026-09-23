@@ -172,13 +172,13 @@ class SemanticPlannerV2:
         # --- LLM API Client Configuration ---
         self.primary_key = os.getenv("LLM_API_KEY") or "dummy-key-for-init"
         self.primary_url = os.getenv("LLM_BASE_URL") or "https://api.deepseek.com"
-        self.primary_model = os.getenv("LLM_MODEL") or "deepseek-chat"
+        self.primary_model = os.getenv("LLM_MODEL") or "deepseek-flash"
         self.primary_client = OpenAI(api_key=self.primary_key, base_url=self.primary_url)
 
         # Fallback configuration uses the same generically if not explicitly provided
         self.fallback_key = os.getenv("LLM_API_KEY") or self.primary_key
         self.fallback_url = os.getenv("LLM_BASE_URL") or "https://api.deepseek.com"
-        self.fallback_model = os.getenv("LLM_MODEL") or "deepseek-chat"
+        self.fallback_model = os.getenv("LLM_MODEL") or "deepseek-flash"
         self.fallback_client = OpenAI(api_key=self.fallback_key, base_url=self.fallback_url)
 
         # Circuit breaker for primary provider
