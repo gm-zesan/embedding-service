@@ -1,0 +1,191 @@
+{
+  "file_id": "06b0a5fea1a5",
+  "filename": "test_business_report.xlsx",
+  "db_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/storage/excel_databases/ws_1_06b0a5fea1a5.sqlite",
+  "db_filename": "ws_1_06b0a5fea1a5.sqlite",
+  "workspace_id": 1,
+  "conversation_id": null,
+  "sheets_count": 3,
+  "total_rows": 13,
+  "tables": {
+    "sales_data": {
+      "sheet_title": "Sales_Data",
+      "table_name": "sales_data",
+      "row_count": 5,
+      "columns": [
+        "order_id",
+        "customer_name",
+        "product_name",
+        "quantity",
+        "unit_price",
+        "total_amount",
+        "salesperson",
+        "date"
+      ],
+      "original_columns": [
+        "Order ID",
+        "Customer Name",
+        "Product Name",
+        "Quantity",
+        "Unit Price",
+        "Total Amount",
+        "Salesperson",
+        "Date"
+      ],
+      "measures": [
+        "order_id",
+        "quantity",
+        "unit_price",
+        "total_amount"
+      ],
+      "dimensions": [
+        "customer_name",
+        "product_name",
+        "salesperson",
+        "date"
+      ],
+      "sample_preview": [
+        {
+          "order_id": 101,
+          "customer_name": "Rahim",
+          "product_name": "Laptop Pro",
+          "quantity": 1,
+          "unit_price": 85000,
+          "total_amount": 85000,
+          "salesperson": "Hasan",
+          "date": "2026-09-01"
+        },
+        {
+          "order_id": 102,
+          "customer_name": "Karim",
+          "product_name": "Keyboard",
+          "quantity": 2,
+          "unit_price": 4000,
+          "total_amount": 8000,
+          "salesperson": "Mehedi",
+          "date": "2026-09-03"
+        },
+        {
+          "order_id": 103,
+          "customer_name": "Jamila",
+          "product_name": "Office Chair",
+          "quantity": 1,
+          "unit_price": 18000,
+          "total_amount": 18000,
+          "salesperson": "Hasan",
+          "date": "2026-09-05"
+        }
+      ]
+    },
+    "expenses": {
+      "sheet_title": "Expenses",
+      "table_name": "expenses",
+      "row_count": 4,
+      "columns": [
+        "expense_id",
+        "category",
+        "amount",
+        "vendor",
+        "payment_method",
+        "date"
+      ],
+      "original_columns": [
+        "Expense ID",
+        "Category",
+        "Amount",
+        "Vendor",
+        "Payment Method",
+        "Date"
+      ],
+      "measures": [
+        "amount"
+      ],
+      "dimensions": [
+        "expense_id",
+        "category",
+        "vendor",
+        "payment_method",
+        "date"
+      ],
+      "sample_preview": [
+        {
+          "expense_id": "EXP-01",
+          "category": "Office Rent",
+          "amount": 50000,
+          "vendor": "Building Owner",
+          "payment_method": "Bank",
+          "date": "2026-09-01"
+        },
+        {
+          "expense_id": "EXP-02",
+          "category": "Internet & Utilities",
+          "amount": 6500,
+          "vendor": "ISP Provider",
+          "payment_method": "bKash",
+          "date": "2026-09-02"
+        },
+        {
+          "expense_id": "EXP-03",
+          "category": "Marketing Ads",
+          "amount": 25000,
+          "vendor": "Facebook Ads",
+          "payment_method": "Card",
+          "date": "2026-09-08"
+        }
+      ]
+    },
+    "employees": {
+      "sheet_title": "Employees",
+      "table_name": "employees",
+      "row_count": 4,
+      "columns": [
+        "emp_id",
+        "name",
+        "department",
+        "salary",
+        "join_date"
+      ],
+      "original_columns": [
+        "Emp ID",
+        "Name",
+        "Department",
+        "Salary",
+        "Join Date"
+      ],
+      "measures": [
+        "emp_id",
+        "salary"
+      ],
+      "dimensions": [
+        "name",
+        "department",
+        "join_date"
+      ],
+      "sample_preview": [
+        {
+          "emp_id": 1,
+          "name": "Hasan",
+          "department": "Sales",
+          "salary": 35000,
+          "join_date": "2024-01-15"
+        },
+        {
+          "emp_id": 2,
+          "name": "Mehedi",
+          "department": "Sales",
+          "salary": 30000,
+          "join_date": "2024-05-01"
+        },
+        {
+          "emp_id": 3,
+          "name": "Rakib",
+          "department": "Sales",
+          "salary": 32000,
+          "join_date": "2025-02-10"
+        }
+      ]
+    }
+  },
+  "schema_catalog": "### Uploaded Excel File: `test_business_report.xlsx` (Virtual Database)\nTotal Sheets/Tables: 3, Total Records: 13\n\n- **Table/Sheet `sales_data`** (Original: \"Sales_Data\", 5 rows):\n  - Columns: order_id, customer_name, product_name, quantity, unit_price, total_amount, salesperson, date\n  - Numeric Measures: order_id, quantity, unit_price, total_amount\n  - Text/Dimensions: customer_name, product_name, salesperson, date\n- **Table/Sheet `expenses`** (Original: \"Expenses\", 4 rows):\n  - Columns: expense_id, category, amount, vendor, payment_method, date\n  - Numeric Measures: amount\n  - Text/Dimensions: expense_id, category, vendor, payment_method, date\n- **Table/Sheet `employees`** (Original: \"Employees\", 4 rows):\n  - Columns: emp_id, name, department, salary, join_date\n  - Numeric Measures: emp_id, salary\n  - Text/Dimensions: name, department, join_date",
+  "created_at": 1790223433.7802722
+}

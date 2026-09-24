@@ -1,8 +1,11 @@
+import os
+import shutil
+import tempfile
 import time
 import logging
 from typing import Optional, List, Dict, Any, Literal
 # pyrefly: ignore [missing-import]
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, UploadFile, File, Form
 # pyrefly: ignore [missing-import]
 from pydantic import BaseModel, Field
 
@@ -13,6 +16,7 @@ from .validator import SemanticValidator
 from .compiler import AnalyticsCompilerV2
 from .fuzzy_resolver import fuzzy_resolver
 from .schema_discovery import auto_catalog
+from .excel_engine import excel_engine
 
 # Shared Safe Execution and Formatting
 from .executor import AnalyticsExecutor, SecurityViolationError
@@ -33,7 +37,8 @@ formatter = AnalyticsFormatter()
 class AnalyticsQueryRequest(BaseModel):
     query: str = Field(..., description="Natural language business intelligence question")
     workspace_id: int = Field(..., description="Authenticated multi-tenant workspace context")
-    engine: Literal["semantic"] = Field("semantic", description="Engine to use")
+    engine: Literal["semantic", "excel"] = Field("semantic", description="Engine to use")
+    file_id: Optional[str] = Field(default=None, description="Optional uploaded Excel virtual database file ID")
     history: Optional[List[Dict[str, str]]] = Field(default=None, description="Recent conversation turns")
 
 
@@ -51,10 +56,74 @@ class AnalyticsQueryResponse(BaseModel):
     fallback_triggered: bool = False
 
 
+class ExcelQueryRequest(BaseModel):
+    workspace_id: int = Field(..., description="Authenticated workspace context")
+    question: str = Field(..., description="Natural language question about the uploaded Excel file")
+    file_id: Optional[str] = Field(default=None, description="Uploaded file ID (uses latest if empty)")
+    history: Optional[List[Dict[str, str]]] = Field(default=None, description="Recent conversation turns")
+
+
 @router.get("/schema")
 def get_discovered_schema():
     """Returns dynamic schema discovery and auto-cataloged metadata."""
     return auto_catalog.discover_and_catalog()
+
+
+@router.post("/excel/upload")
+async def upload_excel_file(
+    file: UploadFile = File(...),
+    workspace_id: int = Form(...),
+    conversation_id: Optional[str] = Form(None),
+):
+    """
+    Ingests an uploaded Excel (.xlsx, .xls) or CSV file.
+    Creates an isolated SQLite virtual database where each tab is an analytical table.
+    """
+    filename = file.filename or "uploaded_spreadsheet.xlsx"
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in (".xlsx", ".xls", ".csv"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file format: {ext}. Only .xlsx, .xls, and .csv are supported.",
+        )
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = tmp.name
+
+    try:
+        metadata = excel_engine.ingest_excel_file(
+            file_path=tmp_path,
+            original_filename=filename,
+            workspace_id=workspace_id,
+            conversation_id=conversation_id,
+        )
+        return {
+            "success": True,
+            "message": f"Successfully ingested '{filename}' with {metadata['sheets_count']} sheets and {metadata['total_rows']} rows.",
+            "file_id": metadata["file_id"],
+            "filename": metadata["filename"],
+            "sheets": list(metadata["tables"].keys()),
+            "total_rows": metadata["total_rows"],
+            "schema_summary": metadata["schema_catalog"],
+        }
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+@router.post("/excel/query")
+def query_excel_database(req: ExcelQueryRequest):
+    """
+    Queries an uploaded Excel virtual database using natural language.
+    """
+    res = excel_engine.query_excel(
+        workspace_id=req.workspace_id,
+        file_id=req.file_id or "",
+        question=req.question,
+        history=req.history,
+    )
+    return res
 
 
 @router.post("/query", response_model=AnalyticsQueryResponse)
@@ -70,6 +139,40 @@ def handle_analytics_query(req: AnalyticsQueryRequest):
         )
 
     # -------------------------------------------------------------
+    # Check if query is targeting an uploaded Excel virtual database
+    # -------------------------------------------------------------
+    q_lower = query.lower()
+    is_excel_keyword = (
+        req.engine == "excel" or 
+        bool(req.file_id) or 
+        any(kw in q_lower for kw in (
+            "sheet", "tab", "excel", "file e", "spreadsheet", 
+            "salary", "expense", "expenses", "employee", "employees", "payroll", "vendor"
+        ))
+    )
+    if is_excel_keyword:
+        excel_res = excel_engine.query_excel(
+            workspace_id=workspace_id,
+            file_id=req.file_id or "",
+            question=query,
+            history=req.history,
+        )
+        if excel_res.get("success") and excel_res.get("rows"):
+            return AnalyticsQueryResponse(
+                success=True,
+                intent="excel_file_query",
+                report=excel_res["report"],
+                sql=excel_res.get("sql"),
+                rows=excel_res.get("rows", []),
+                is_security_rejection=False,
+                is_ambiguous=False,
+                latency_ms=excel_res.get("latency_ms", 0.0),
+                engine="excel_virtual_db",
+                provider_used="excel_sql_planner",
+                fallback_triggered=False,
+            )
+
+    # -------------------------------------------------------------
     # Primary Pipeline: Phase 3.x Generic Semantic Analytics Engine
     # -------------------------------------------------------------
     try:
@@ -77,8 +180,31 @@ def handle_analytics_query(req: AnalyticsQueryRequest):
         plan, meta = planner.plan(query, history=req.history)
         llm_latency = meta.get("latency_ms", 0.0)
 
-        # 2. Early Security Rejection
+        # 2. Early Security Rejection (with Excel fallback if not malicious mutation)
         if plan.is_security_rejection:
+            if plan.rejection_reason == "out_of_domain":
+                # Check if Excel virtual database can answer it
+                excel_fallback = excel_engine.query_excel(
+                    workspace_id=workspace_id,
+                    file_id=req.file_id or "",
+                    question=query,
+                    history=req.history,
+                )
+                if excel_fallback.get("success") and excel_fallback.get("rows"):
+                    return AnalyticsQueryResponse(
+                        success=True,
+                        intent="excel_file_fallback",
+                        report=excel_fallback["report"],
+                        sql=excel_fallback.get("sql"),
+                        rows=excel_fallback.get("rows", []),
+                        is_security_rejection=False,
+                        is_ambiguous=False,
+                        latency_ms=excel_fallback.get("latency_ms", 0.0),
+                        engine="excel_virtual_db",
+                        provider_used="excel_sql_planner",
+                        fallback_triggered=True,
+                    )
+
             report = formatter.format(query, plan, [], latency_ms=llm_latency)
             return AnalyticsQueryResponse(
                 success=True,
@@ -117,6 +243,28 @@ def handle_analytics_query(req: AnalyticsQueryRequest):
         # 5. Semantic Validation
         val_res = validator.validate_plan(plan)
         if not val_res.is_valid:
+            # Check Excel fallback before returning validation notice
+            excel_fallback = excel_engine.query_excel(
+                workspace_id=workspace_id,
+                file_id=req.file_id or "",
+                question=query,
+                history=req.history,
+            )
+            if excel_fallback.get("success") and excel_fallback.get("rows"):
+                return AnalyticsQueryResponse(
+                    success=True,
+                    intent="excel_file_fallback",
+                    report=excel_fallback["report"],
+                    sql=excel_fallback.get("sql"),
+                    rows=excel_fallback.get("rows", []),
+                    is_security_rejection=False,
+                    is_ambiguous=False,
+                    latency_ms=excel_fallback.get("latency_ms", 0.0),
+                    engine="excel_virtual_db",
+                    provider_used="excel_sql_planner",
+                    fallback_triggered=True,
+                )
+
             logger.warning(f"[Phase 3.x] Semantic validation failed: {val_res.errors}")
             error_details = "\n".join(f"- {err}" for err in val_res.errors)
             report = (
