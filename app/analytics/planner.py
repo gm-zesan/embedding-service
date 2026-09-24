@@ -1,3 +1,4 @@
+from .schema_discovery import schema_discovery
 """
 Phase 3.x Generic Semantic Analytics Engine - Semantic Planner v2.
 Translates natural language questions into structured SemanticQueryPlan ASTs.
@@ -210,8 +211,10 @@ class SemanticPlannerV2:
         else:
             user_content = f"Business Question: {question}"
 
+        schema_ctx = schema_discovery.get_prompt_schema_context()
+        system_content = f"{PLANNER_V2_SYSTEM_PROMPT}\n\n<LIVE_DATABASE_CATALOG>\n{schema_ctx}\n</LIVE_DATABASE_CATALOG>"
         return [
-            {"role": "system", "content": PLANNER_V2_SYSTEM_PROMPT},
+            {"role": "system", "content": system_content},
             {"role": "user", "content": user_content},
         ]
 

@@ -11,7 +11,8 @@ from .models import SemanticQueryPlan
 from .planner import SemanticPlannerV2
 from .validator import SemanticValidator
 from .compiler import AnalyticsCompilerV2
-
+from .fuzzy_resolver import fuzzy_resolver
+from .schema_discovery import auto_catalog
 
 # Shared Safe Execution and Formatting
 from .executor import AnalyticsExecutor, SecurityViolationError
@@ -25,8 +26,6 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 planner = SemanticPlannerV2()
 validator = SemanticValidator()
 compiler = AnalyticsCompilerV2()
-
-
 executor = AnalyticsExecutor()
 formatter = AnalyticsFormatter()
 
@@ -52,6 +51,11 @@ class AnalyticsQueryResponse(BaseModel):
     fallback_triggered: bool = False
 
 
+@router.get("/schema")
+def get_discovered_schema():
+    """Returns dynamic schema discovery and auto-cataloged metadata."""
+    return auto_catalog.discover_and_catalog()
+
 
 @router.post("/query", response_model=AnalyticsQueryResponse)
 def handle_analytics_query(req: AnalyticsQueryRequest):
@@ -69,10 +73,11 @@ def handle_analytics_query(req: AnalyticsQueryRequest):
     # Primary Pipeline: Phase 3.x Generic Semantic Analytics Engine
     # -------------------------------------------------------------
     try:
+        # 1. Semantic Planning with Live Auto-Catalog
         plan, meta = planner.plan(query, history=req.history)
         llm_latency = meta.get("latency_ms", 0.0)
 
-        # 1. Early Security Rejection
+        # 2. Early Security Rejection
         if plan.is_security_rejection:
             report = formatter.format(query, plan, [], latency_ms=llm_latency)
             return AnalyticsQueryResponse(
@@ -89,7 +94,7 @@ def handle_analytics_query(req: AnalyticsQueryRequest):
                 fallback_triggered=meta.get("fallback_triggered", False),
             )
 
-        # 2. Early Clarification Handling
+        # 3. Early Clarification Handling
         if plan.needs_clarification:
             report = formatter.format(query, plan, [], latency_ms=llm_latency)
             return AnalyticsQueryResponse(
@@ -106,7 +111,10 @@ def handle_analytics_query(req: AnalyticsQueryRequest):
                 fallback_triggered=meta.get("fallback_triggered", False),
             )
 
-        # 3. Semantic Validation
+        # 4. Phase 1: Fuzzy Entity Normalization (Resolves misspellings like 'hasn', 'laptp', 'bksh')
+        plan = fuzzy_resolver.normalize_plan(plan, workspace_id=workspace_id)
+
+        # 5. Semantic Validation
         val_res = validator.validate_plan(plan)
         if not val_res.is_valid:
             logger.warning(f"[Phase 3.x] Semantic validation failed: {val_res.errors}")
@@ -132,17 +140,17 @@ def handle_analytics_query(req: AnalyticsQueryRequest):
                 fallback_triggered=meta.get("fallback_triggered", False),
             )
 
-        # 4. Deterministic SQL Compilation
+        # 6. Deterministic SQL Compilation
         sql, params = compiler.compile(plan, workspace_id=workspace_id)
 
-        # 5. Safe Read-Only Execution
+        # 7. Safe Read-Only Execution
         rows, exec_latency = executor.execute(sql, params)
         total_latency = round(llm_latency + exec_latency, 2)
 
-        # 6. Report Formatting
+        # 8. Report Formatting
         report = formatter.format(query, plan, rows, latency_ms=total_latency)
 
-        # Derive clean high-level intent label for backward compatibility
+        # Derive clean high-level intent label
         intent_label = f"{plan.domain.value}_query"
         if plan.measures:
             intent_label = f"{plan.domain.value}_{plan.measures[0].name}"

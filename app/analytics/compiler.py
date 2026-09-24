@@ -537,7 +537,7 @@ class AnalyticsCompilerV2:
                 sql_parts.append(f"LIMIT {plan.limit}")
             return " ".join(sql_parts) + ";", params
 
-        sp_filter = next((f for f in plan.filters if f.field in ("salesperson", "collector", "salesperson_name", "collector_name")), None)
+        sp_filter = next((f for f in plan.filters if f.field in ("salesperson", "collector", "assigned_collector", "salesperson_name", "collector_name")), None)
         if sp_filter and not plan.group_by and (not plan.time_range or plan.time_range.type == "lifetime") and not any(f.field in ("product", "category") for f in plan.filters):
             sp_name = sp_filter.value
             pm_filter = next((f for f in plan.filters if f.field in ("payment_method", "method")), None)
@@ -649,7 +649,7 @@ class AnalyticsCompilerV2:
         referenced_fields.update(plan.group_by)
         referenced_fields.update(f.field for f in plan.filters)
 
-        if "salesperson" in referenced_fields or "collector" in referenced_fields:
+        if any(k in referenced_fields for k in ("salesperson", "collector", "assigned_collector", "salesperson_name", "collector_name")):
             if base_alias in ("o", "oi"):
                 joins.append("JOIN analytics_salespersons s ON s.id = o.salesperson_id AND s.workspace_id = ?")
                 params.append(workspace_id)
@@ -674,7 +674,7 @@ class AnalyticsCompilerV2:
                 joined_tables.add("analytics_products")
 
         for g in plan.group_by:
-            if g in ("salesperson", "collector"):
+            if g in ("salesperson", "collector", "assigned_collector"):
                 select_items.append("s.name AS salesperson")
                 group_items.append("s.name")
             elif g == "customer":
@@ -738,7 +738,7 @@ class AnalyticsCompilerV2:
             params.extend(time_params)
 
         for f in plan.filters:
-            if f.field in ("salesperson", "collector"):
+            if f.field in ("salesperson", "collector", "assigned_collector"):
                 where_clauses.append("s.name = ?")
                 params.append(f.value)
             elif f.field == "customer":

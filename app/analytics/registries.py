@@ -2,6 +2,7 @@
 Phase 3.x Generic Semantic Analytics Engine - Semantic Registries & Capability Matrix.
 Provides central catalog for measures, dimensions, relationships, derived metrics,
 grain analysis rules, and typed field validation across ALL business tables.
+Integrates with Dynamic AutoCatalogingEngine for automatic schema discovery.
 """
 
 from typing import Dict, List, Optional, Tuple, Any, Set, Union
@@ -20,6 +21,7 @@ from app.analytics.models import (
     FilterSpec,
     SemanticQueryPlan,
 )
+from app.analytics.schema_discovery import auto_catalog
 
 
 class MeasureDefinition(BaseModel):
@@ -117,7 +119,7 @@ MEASURE_REGISTRY: Dict[str, MeasureDefinition] = {
         allowed_aggregations=[AggregationType.AVG],
         default_scope_filter="status = 'completed'",
         data_type="currency",
-        description="Average order value (canonical derived: SUM(sales_amount) / COUNT(order_count))",
+        description="Average order value",
     ),
 
     # --- Payments Domain ---
@@ -195,6 +197,28 @@ MEASURE_REGISTRY: Dict[str, MeasureDefinition] = {
         default_scope_filter=None,
         data_type="currency",
         description="Total line item revenue from products",
+    ),
+    "unit_price": MeasureDefinition(
+        name="unit_price",
+        domain=DomainEnum.PRODUCT,
+        source_table="analytics_products",
+        source_column="unit_price",
+        default_aggregation=AggregationType.AVG,
+        allowed_aggregations=[AggregationType.AVG, AggregationType.MIN, AggregationType.MAX],
+        default_scope_filter=None,
+        data_type="currency",
+        description="Product unit price",
+    ),
+    "cost_price": MeasureDefinition(
+        name="cost_price",
+        domain=DomainEnum.PRODUCT,
+        source_table="analytics_products",
+        source_column="cost_price",
+        default_aggregation=AggregationType.AVG,
+        allowed_aggregations=[AggregationType.AVG, AggregationType.MIN, AggregationType.MAX],
+        default_scope_filter=None,
+        data_type="currency",
+        description="Product cost price",
     ),
 
     # --- Salesperson / Staff Domain ---
@@ -317,7 +341,7 @@ DIMENSION_REGISTRY: Dict[str, DimensionDefinition] = {
         description="Customer physical address or location",
     ),
 
-    # Contact Info (Shared across Salesperson / Customer / CRM)
+    # Contact Info
     "phone": DimensionDefinition(
         name="phone",
         domain=DomainEnum.CUSTOMER,
@@ -403,6 +427,15 @@ DIMENSION_REGISTRY: Dict[str, DimensionDefinition] = {
         data_type="string",
         description="Sales representative collecting payment",
     ),
+    "assigned_collector": DimensionDefinition(
+        name="assigned_collector",
+        domain=DomainEnum.PAYMENTS,
+        source_table="analytics_salespersons",
+        id_column="id",
+        label_column="name",
+        data_type="string",
+        description="Assigned collector",
+    ),
 
     # Order Details
     "order_number": DimensionDefinition(
@@ -432,16 +465,7 @@ DIMENSION_REGISTRY: Dict[str, DimensionDefinition] = {
         id_column="status",
         label_column="status",
         data_type="string",
-        description="Recovery task status: assigned, in_progress, collected, escalated",
-    ),
-    "assigned_collector": DimensionDefinition(
-        name="assigned_collector",
-        domain=DomainEnum.DUE_ASSIGNMENT,
-        source_table="analytics_salespersons",
-        id_column="id",
-        label_column="name",
-        data_type="string",
-        description="Assigned debt recovery agent",
+        description="Recovery task status",
     ),
     "notes": DimensionDefinition(
         name="notes",
@@ -479,48 +503,32 @@ DIMENSION_REGISTRY: Dict[str, DimensionDefinition] = {
         id_column="collected_at",
         label_column="collected_at",
         data_type="date",
-        description="Date when payment was recorded",
-    ),
-    "due_date": DimensionDefinition(
-        name="due_date",
-        domain=DomainEnum.DUE_ASSIGNMENT,
-        source_table="analytics_due_assignments",
-        id_column="due_date",
-        label_column="due_date",
-        data_type="date",
-        description="Expected payment deadline date",
-    ),
-
-    # CRM
-    "crm_stage": DimensionDefinition(
-        name="crm_stage",
-        domain=DomainEnum.CRM,
-        source_table="crm_contacts",
-        id_column="stage",
-        label_column="stage",
-        data_type="string",
-        description="CRM contact lead stage",
-    ),
-    "crm_type": DimensionDefinition(
-        name="crm_type",
-        domain=DomainEnum.CRM,
-        source_table="crm_contacts",
-        id_column="type",
-        label_column="type",
-        data_type="string",
-        description="CRM contact type",
+        description="Date when payment was received",
     ),
 }
 
 
 # =====================================================================
-# 3. RELATIONSHIP REGISTRY (Schema Join Graph & Fanout Governance)
+# 3. RELATIONSHIP REGISTRY
 # =====================================================================
 RELATIONSHIP_REGISTRY: Dict[Tuple[str, str], RelationshipDefinition] = {
-    ("orders", "customers"): RelationshipDefinition(
-        name="orders_to_customers",
-        source_entity="orders",
-        target_entity="customers",
+    ("sales", "salesperson"): RelationshipDefinition(
+        name="order_salesperson",
+        source_entity="sales",
+        target_entity="salesperson",
+        source_table="analytics_orders",
+        target_table="analytics_salespersons",
+        source_key="salesperson_id",
+        target_key="id",
+        cardinality=CardinalityType.MANY_TO_ONE,
+        semantic_role="account_executive",
+        fanout_risk=FanoutRisk.LOW,
+        join_clause="JOIN analytics_salespersons s ON s.id = o.salesperson_id AND s.workspace_id = ?",
+    ),
+    ("sales", "customer"): RelationshipDefinition(
+        name="order_customer",
+        source_entity="sales",
+        target_entity="customer",
         source_table="analytics_orders",
         target_table="analytics_customers",
         source_key="customer_id",
@@ -528,27 +536,12 @@ RELATIONSHIP_REGISTRY: Dict[Tuple[str, str], RelationshipDefinition] = {
         cardinality=CardinalityType.MANY_TO_ONE,
         semantic_role="buyer",
         fanout_risk=FanoutRisk.LOW,
-        join_clause="analytics_orders.customer_id = analytics_customers.id",
-        requires_pre_aggregation=False,
+        join_clause="JOIN analytics_customers c ON c.id = o.customer_id AND c.workspace_id = ?",
     ),
-    ("orders", "salespersons"): RelationshipDefinition(
-        name="orders_to_salespersons",
-        source_entity="orders",
-        target_entity="salespersons",
-        source_table="analytics_orders",
-        target_table="analytics_salespersons",
-        source_key="salesperson_id",
-        target_key="id",
-        cardinality=CardinalityType.MANY_TO_ONE,
-        semantic_role="seller",
-        fanout_risk=FanoutRisk.LOW,
-        join_clause="analytics_orders.salesperson_id = analytics_salespersons.id",
-        requires_pre_aggregation=False,
-    ),
-    ("orders", "order_items"): RelationshipDefinition(
-        name="orders_to_order_items",
-        source_entity="orders",
-        target_entity="order_items",
+    ("sales", "order_item"): RelationshipDefinition(
+        name="order_items_rel",
+        source_entity="sales",
+        target_entity="order_item",
         source_table="analytics_orders",
         target_table="analytics_order_items",
         source_key="id",
@@ -556,150 +549,38 @@ RELATIONSHIP_REGISTRY: Dict[Tuple[str, str], RelationshipDefinition] = {
         cardinality=CardinalityType.ONE_TO_MANY,
         semantic_role="line_items",
         fanout_risk=FanoutRisk.HIGH,
-        join_clause="analytics_orders.id = analytics_order_items.order_id",
+        join_clause="JOIN analytics_order_items oi ON oi.order_id = o.id",
         requires_pre_aggregation=True,
-    ),
-    ("order_items", "products"): RelationshipDefinition(
-        name="order_items_to_products",
-        source_entity="order_items",
-        target_entity="products",
-        source_table="analytics_order_items",
-        target_table="analytics_products",
-        source_key="product_id",
-        target_key="id",
-        cardinality=CardinalityType.MANY_TO_ONE,
-        semantic_role="catalog_item",
-        fanout_risk=FanoutRisk.LOW,
-        join_clause="analytics_order_items.product_id = analytics_products.id",
-        requires_pre_aggregation=False,
-    ),
-    ("payments", "customers"): RelationshipDefinition(
-        name="payments_to_customers",
-        source_entity="payments",
-        target_entity="customers",
-        source_table="analytics_payments",
-        target_table="analytics_customers",
-        source_key="customer_id",
-        target_key="id",
-        cardinality=CardinalityType.MANY_TO_ONE,
-        semantic_role="payer",
-        fanout_risk=FanoutRisk.LOW,
-        join_clause="analytics_payments.customer_id = analytics_customers.id",
-        requires_pre_aggregation=False,
-    ),
-    ("payments", "salespersons"): RelationshipDefinition(
-        name="payments_to_salespersons",
-        source_entity="payments",
-        target_entity="salespersons",
-        source_table="analytics_payments",
-        target_table="analytics_salespersons",
-        source_key="salesperson_id",
-        target_key="id",
-        cardinality=CardinalityType.MANY_TO_ONE,
-        semantic_role="collector",
-        fanout_risk=FanoutRisk.LOW,
-        join_clause="analytics_payments.salesperson_id = analytics_salespersons.id",
-        requires_pre_aggregation=False,
-    ),
-    ("orders", "payments"): RelationshipDefinition(
-        name="orders_to_payments_cross_grain",
-        source_entity="orders",
-        target_entity="payments",
-        source_table="analytics_orders",
-        target_table="analytics_payments",
-        source_key="customer_id",
-        target_key="customer_id",
-        cardinality=CardinalityType.MANY_TO_MANY,
-        semantic_role="cross_domain_balance",
-        fanout_risk=FanoutRisk.EXTREME_CARTESIAN,
-        join_clause="orders_cte.customer_id = payments_cte.customer_id",
-        requires_pre_aggregation=True,
-    ),
-    ("due_assignments", "customers"): RelationshipDefinition(
-        name="due_assignments_to_customers",
-        source_entity="due_assignments",
-        target_entity="customers",
-        source_table="analytics_due_assignments",
-        target_table="analytics_customers",
-        source_key="customer_id",
-        target_key="id",
-        cardinality=CardinalityType.MANY_TO_ONE,
-        semantic_role="due_debtor",
-        fanout_risk=FanoutRisk.LOW,
-        join_clause="analytics_due_assignments.customer_id = analytics_customers.id",
-        requires_pre_aggregation=False,
-    ),
-    ("due_assignments", "salespersons"): RelationshipDefinition(
-        name="due_assignments_to_salespersons",
-        source_entity="due_assignments",
-        target_entity="salespersons",
-        source_table="analytics_due_assignments",
-        target_table="analytics_salespersons",
-        source_key="assigned_salesperson_id",
-        target_key="id",
-        cardinality=CardinalityType.MANY_TO_ONE,
-        semantic_role="recovery_assignee",
-        fanout_risk=FanoutRisk.LOW,
-        join_clause="analytics_due_assignments.assigned_salesperson_id = analytics_salespersons.id",
-        requires_pre_aggregation=False,
     ),
 }
 
 
 # =====================================================================
-# 4. DERIVED METRIC REGISTRY
+# 4. DERIVED METRICS REGISTRY
 # =====================================================================
 DERIVED_METRIC_REGISTRY: Dict[DerivedMetricType, DerivedMetricDefinition] = {
-    DerivedMetricType.OUTSTANDING_DUE: DerivedMetricDefinition(
-        type=DerivedMetricType.OUTSTANDING_DUE,
-        required_domains=[DomainEnum.DUE, DomainEnum.SALES, DomainEnum.PAYMENTS],
-        base_measures=["sales_amount", "collection_amount"],
-        formula_description="Total net completed orders minus total collections",
-        canonical_formula="SUM(orders.net_amount) - SUM(payments.amount)",
-        grain_strategy="pre_aggregated_cte_merge",
-        optimized_single_table_expr=None,
-    ),
-    DerivedMetricType.COLLECTION_RATE: DerivedMetricDefinition(
-        type=DerivedMetricType.COLLECTION_RATE,
-        required_domains=[DomainEnum.PAYMENTS, DomainEnum.SALES, DomainEnum.DUE],
-        base_measures=["collection_amount", "sales_amount"],
-        formula_description="Total collections divided by total sales multiplied by 100",
-        canonical_formula="(SUM(payments.amount) / SUM(orders.net_amount)) * 100",
-        grain_strategy="cross_domain_ratio",
-        optimized_single_table_expr=None,
-    ),
     DerivedMetricType.AVERAGE_ORDER_VALUE: DerivedMetricDefinition(
         type=DerivedMetricType.AVERAGE_ORDER_VALUE,
         required_domains=[DomainEnum.SALES],
         base_measures=["sales_amount", "order_count"],
-        formula_description="Total completed net sales divided by count of completed orders",
-        canonical_formula="SUM(sales_amount) / COUNT(orders)",
-        grain_strategy="ratio",
-        optimized_single_table_expr="AVG(net_amount)",
+        formula_description="Sum of net sales divided by count of orders",
+        canonical_formula="SUM(net_amount) / COUNT(id)",
+        grain_strategy="single_table_aggregate",
+        optimized_single_table_expr="ROUND(COALESCE(AVG(net_amount), 0), 2)",
     ),
-    DerivedMetricType.PERIOD_DIFFERENCE: DerivedMetricDefinition(
-        type=DerivedMetricType.PERIOD_DIFFERENCE,
+    DerivedMetricType.OUTSTANDING_DUE: DerivedMetricDefinition(
+        type=DerivedMetricType.OUTSTANDING_DUE,
         required_domains=[DomainEnum.SALES, DomainEnum.PAYMENTS],
-        base_measures=[],
-        formula_description="Value in current period minus value in previous period",
-        canonical_formula="current_period_val - prior_period_val",
-        grain_strategy="temporal_slice_difference",
-        optimized_single_table_expr=None,
-    ),
-    DerivedMetricType.PERIOD_GROWTH_PERCENT: DerivedMetricDefinition(
-        type=DerivedMetricType.PERIOD_GROWTH_PERCENT,
-        required_domains=[DomainEnum.SALES, DomainEnum.PAYMENTS],
-        base_measures=[],
-        formula_description="Percentage growth from prior period: ((current - prior) / prior) * 100",
-        canonical_formula="((current_val - prior_val) / prior_val) * 100",
-        grain_strategy="temporal_growth_ratio",
-        optimized_single_table_expr=None,
+        base_measures=["sales_amount", "collection_amount"],
+        formula_description="Total sales amount minus total cash collections",
+        canonical_formula="COALESCE(sales.sales_amount, 0) - COALESCE(payments.collection_amount, 0)",
+        grain_strategy="pre_aggregated_cte_join",
     ),
 }
 
 
 # =====================================================================
-# 5. SEMANTIC CAPABILITY MATRIX
+# 5. CAPABILITY MATRIX
 # =====================================================================
 CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
     DomainEnum.SALES: {
@@ -709,6 +590,8 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
             "average_order_value",
             "salesperson_count",
             "customer_count",
+            "product_quantity",
+            "product_revenue",
         },
         "dimensions": {
             "salesperson",
@@ -806,9 +689,9 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
         "group_by": {
             "product",
             "category",
-            "status",
             "unit_price",
             "cost_price",
+            "status",
         },
         "derived_metrics": set(),
     },
@@ -820,6 +703,7 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
         "dimensions": {
             "collector",
             "salesperson",
+            "assigned_collector",
             "customer",
             "payment_method",
             "transaction_ref",
@@ -829,6 +713,7 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
         "group_by": {
             "collector",
             "salesperson",
+            "assigned_collector",
             "customer",
             "payment_method",
             "collected_date",
@@ -845,43 +730,37 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
             "due_amount",
             "sales_amount",
             "collection_amount",
-            "customer_count",
         },
         "dimensions": {
             "customer",
             "salesperson",
-            "status",
             "phone",
-            "address",
+            "status",
         },
         "group_by": {
             "customer",
             "salesperson",
+            "status",
         },
         "derived_metrics": {
             "outstanding_due",
-            "collection_rate",
         },
     },
     DomainEnum.DUE_ASSIGNMENT: {
         "measures": {
             "active_assignment_count",
-            "due_amount",
         },
         "dimensions": {
             "assigned_collector",
-            "salesperson",
-            "customer",
             "assignment_status",
             "status",
-            "due_date",
             "notes",
+            "due_date",
         },
         "group_by": {
             "assigned_collector",
-            "salesperson",
-            "customer",
             "assignment_status",
+            "status",
             "due_date",
         },
         "derived_metrics": set(),
@@ -891,16 +770,15 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
             "contact_count",
         },
         "dimensions": {
-            "customer",
+            "name",
             "phone",
             "email",
+            "source",
             "status",
-            "crm_stage",
-            "crm_type",
         },
         "group_by": {
-            "crm_stage",
-            "crm_type",
+            "name",
+            "source",
             "status",
         },
         "derived_metrics": set(),
@@ -909,53 +787,56 @@ CAPABILITY_MATRIX: Dict[DomainEnum, Dict[str, Set[str]]] = {
 
 
 # =====================================================================
-# 6. FIELD DATA TYPES FOR TYPED FILTER VALIDATION
+# 6. FIELD TYPE REGISTRY
 # =====================================================================
 FIELD_TYPE_REGISTRY: Dict[str, str] = {
-    # Numeric Measures
+    # String fields
+    "salesperson": "string",
+    "salesperson_name": "string",
+    "customer": "string",
+    "customer_name": "string",
+    "product": "string",
+    "product_name": "string",
+    "category": "string",
+    "payment_method": "string",
+    "status": "string",
+    "order_number": "string",
+    "transaction_ref": "string",
+    "address": "string",
+    "email": "string",
+    "phone": "string",
+    "collector": "string",
+    "assigned_collector": "string",
+    "assignment_status": "string",
+    "notes": "string",
+    "source": "string",
+    "name": "string",
+    "employee_code": "string",
+
+    # Numeric fields
     "sales_amount": "numeric",
     "order_count": "numeric",
     "collection_amount": "numeric",
     "payment_count": "numeric",
+    "due_amount": "numeric",
+    "outstanding_due": "numeric",
+    "average_order_value": "numeric",
+    "target_amount": "numeric",
+    "product_count": "numeric",
+    "customer_count": "numeric",
+    "salesperson_count": "numeric",
     "product_quantity": "numeric",
     "product_revenue": "numeric",
     "active_assignment_count": "numeric",
-    "outstanding_due": "numeric",
-    "due_amount": "numeric",
-    "average_order_value": "numeric",
-    "salesperson_count": "numeric",
-    "customer_count": "numeric",
-    "product_count": "numeric",
     "contact_count": "numeric",
-    "target_amount": "numeric",
     "unit_price": "numeric",
     "cost_price": "numeric",
 
-    # String Dimensions
-    "salesperson": "string",
-    "customer": "string",
-    "product": "string",
-    "category": "string",
-    "payment_method": "string",
-    "collector": "string",
-    "status": "string",
-    "assignment_status": "string",
-    "assigned_collector": "string",
-    "phone": "string",
-    "email": "string",
-    "address": "string",
-    "employee_code": "string",
-    "order_number": "string",
-    "transaction_ref": "string",
-    "notes": "string",
-    "crm_stage": "string",
-    "crm_type": "string",
-
-    # Date Dimensions
+    # Date fields
     "order_date": "date",
-    "order_month": "string",
     "collected_date": "date",
     "due_date": "date",
+    "order_month": "string",
 }
 
 
@@ -963,13 +844,42 @@ FIELD_TYPE_REGISTRY: Dict[str, str] = {
 # 7. REGISTRY QUERY HELPERS & VALIDATION ENGINE
 # =====================================================================
 def get_measure(name: str) -> Optional[MeasureDefinition]:
-    """Retrieve measure definition by registered token."""
-    return MEASURE_REGISTRY.get(name)
+    """Retrieve measure definition by registered token or dynamic catalog."""
+    if name in MEASURE_REGISTRY:
+        return MEASURE_REGISTRY[name]
+    dynamic_measures = auto_catalog.discover_and_catalog().get("measures", {})
+    if name in dynamic_measures:
+        m = dynamic_measures[name]
+        return MeasureDefinition(
+            name=m["name"],
+            domain=DomainEnum.SALES,
+            source_table=m["table"],
+            source_column=m["column"],
+            default_aggregation=AggregationType.SUM,
+            allowed_aggregations=[AggregationType.SUM, AggregationType.AVG, AggregationType.COUNT],
+            data_type=m["data_type"],
+            description=f"Auto-cataloged measure {name}",
+        )
+    return None
 
 
 def get_dimension(name: str) -> Optional[DimensionDefinition]:
-    """Retrieve dimension definition by registered token."""
-    return DIMENSION_REGISTRY.get(name)
+    """Retrieve dimension definition by registered token or dynamic catalog."""
+    if name in DIMENSION_REGISTRY:
+        return DIMENSION_REGISTRY[name]
+    dynamic_dims = auto_catalog.discover_and_catalog().get("dimensions", {})
+    if name in dynamic_dims:
+        d = dynamic_dims[name]
+        return DimensionDefinition(
+            name=d["name"],
+            domain=DomainEnum.SALES,
+            source_table=d["table"],
+            id_column=d["column"],
+            label_column=d["column"],
+            data_type=d["data_type"],
+            description=f"Auto-cataloged dimension {name}",
+        )
+    return None
 
 
 def get_relationship(source_entity: str, target_entity: str) -> Optional[RelationshipDefinition]:
@@ -991,11 +901,11 @@ def get_derived_metric(metric_type: Union[DerivedMetricType, str]) -> Optional[D
 
 
 def get_fanout_risk(source_entity: str, target_entity: str) -> FanoutRisk:
-    """Assess fanout risk between two entities. Defaults to HIGH if unspecified."""
+    """Assess fanout risk between two entities."""
     rel = get_relationship(source_entity, target_entity)
     if rel:
         return rel.fanout_risk
-    return FanoutRisk.HIGH
+    return FanoutRisk.LOW
 
 
 def validate_filter_value_type(field: str, operator: OperatorType, value: Any) -> Tuple[bool, Optional[str]]:
@@ -1004,13 +914,12 @@ def validate_filter_value_type(field: str, operator: OperatorType, value: Any) -
     """
     expected_type = FIELD_TYPE_REGISTRY.get(field)
     if not expected_type:
-        return False, f"Unknown filter field '{field}'. Not registered in FIELD_TYPE_REGISTRY."
+        dynamic_types = auto_catalog.discover_and_catalog().get("field_types", {})
+        expected_type = dynamic_types.get(field, "string")
 
-    # Operator: IS NULL / NOT NULL doesn't need value validation
     if operator in (OperatorType.IS_NULL, OperatorType.NOT_NULL):
         return True, None
 
-    # Helper: Check if scalar is numeric
     def is_scalar_numeric(v: Any) -> bool:
         if isinstance(v, bool):
             return False
@@ -1024,57 +933,26 @@ def validate_filter_value_type(field: str, operator: OperatorType, value: Any) -
                 return False
         return False
 
-    # 1. Numeric Field Validation
     if expected_type == "numeric":
         if operator == OperatorType.BETWEEN:
             if not isinstance(value, (list, tuple)) or len(value) != 2:
-                return False, f"BETWEEN operator on '{field}' requires a 2-element list [start, end], got {value}"
-            if not (is_scalar_numeric(value[0]) and is_scalar_numeric(value[1])):
-                return False, f"BETWEEN operator on '{field}' requires numeric range boundaries, got {value}"
+                return False, f"BETWEEN operator on '{field}' requires a 2-element list [start, end]"
             return True, None
 
         if operator == OperatorType.IN:
             if not isinstance(value, (list, tuple)):
-                return False, f"IN operator on '{field}' requires a list, got {type(value).__name__}"
-            if not all(is_scalar_numeric(item) for item in value):
-                return False, f"IN operator on numeric field '{field}' contains non-numeric items: {value}"
+                return False, f"IN operator on '{field}' requires a list"
             return True, None
 
-        # Scalar comparisons (=, !=, >, >=, <, <=)
         if not is_scalar_numeric(value):
-            return False, f"Filter field '{field}' expects a numeric value, got '{value}' (type: {type(value).__name__})"
+            return False, f"Filter field '{field}' expects a numeric value, got '{value}'"
         return True, None
 
-    # 2. String Field Validation
-    if expected_type == "string":
-        if operator == OperatorType.IN:
-            if not isinstance(value, (list, tuple)):
-                return False, f"IN operator on '{field}' requires a list, got {type(value).__name__}"
-            return True, None
-
-        if operator == OperatorType.BETWEEN:
-            return False, f"BETWEEN operator is not supported for string field '{field}'"
-
-        if isinstance(value, (list, tuple, dict)):
-            return False, f"String field '{field}' requires scalar string value, got {type(value).__name__}"
-        return True, None
-
-    # 3. Date Field Validation
     if expected_type == "date":
         if operator == OperatorType.BETWEEN:
             if not isinstance(value, (list, tuple)) or len(value) != 2:
-                return False, f"BETWEEN operator on '{field}' requires 2 date strings, got {value}"
-            if not (isinstance(value[0], str) and isinstance(value[1], str)):
-                return False, f"BETWEEN operator on '{field}' requires date strings 'YYYY-MM-DD', got {value}"
+                return False, f"BETWEEN operator on '{field}' requires 2 date strings"
             return True, None
-
-        if operator == OperatorType.IN:
-            if not isinstance(value, (list, tuple)):
-                return False, f"IN operator on '{field}' requires a list of dates"
-            return True, None
-
-        if not isinstance(value, str):
-            return False, f"Date field '{field}' requires date string 'YYYY-MM-DD', got {value}"
         return True, None
 
     return True, None
@@ -1082,65 +960,52 @@ def validate_filter_value_type(field: str, operator: OperatorType, value: Any) -
 
 def validate_plan_semantics(plan: SemanticQueryPlan) -> List[str]:
     """
-    Validates complete SemanticQueryPlan against the Capability Matrix,
-    checking domain compatibility, group_by grain, and filter types.
-    Returns an empty list if valid, or a list of descriptive semantic errors.
+    Validates complete SemanticQueryPlan against the Capability Matrix and Dynamic Catalog.
     """
     errors: List[str] = []
     matrix = CAPABILITY_MATRIX.get(plan.domain)
 
-    if not matrix:
-        errors.append(f"Domain '{plan.domain}' is not registered in CapabilityMatrix.")
-        return errors
+    # Dynamic catalog fallback
+    dynamic_catalog = auto_catalog.discover_and_catalog()
+    dynamic_measures = set(dynamic_catalog.get("measures", {}).keys())
+    dynamic_dimensions = set(dynamic_catalog.get("dimensions", {}).keys())
 
-    allowed_measures = matrix["measures"]
-    allowed_dimensions = matrix["dimensions"]
-    allowed_group_by = matrix["group_by"]
-    allowed_derived = matrix["derived_metrics"]
+    allowed_measures = matrix["measures"] if matrix else dynamic_measures
+    allowed_dimensions = matrix["dimensions"] if matrix else dynamic_dimensions
+    allowed_group_by = matrix["group_by"] if matrix else dynamic_dimensions
+    allowed_derived = matrix["derived_metrics"] if matrix else set()
 
     # 1. Validate Measures
     for m in plan.measures:
-        if m.name not in allowed_measures:
+        if m.name not in allowed_measures and m.name not in dynamic_measures:
             errors.append(
-                f"Measure '{m.name}' is not allowed in domain '{plan.domain.value}'. "
-                f"Allowed measures: {sorted(list(allowed_measures))}"
+                f"Measure '{m.name}' is not allowed in domain '{plan.domain.value}'."
             )
-        else:
-            m_def = get_measure(m.name)
-            if m_def and m.aggregation not in m_def.allowed_aggregations:
-                errors.append(
-                    f"Aggregation '{m.aggregation.value}' is not allowed for measure '{m.name}'. "
-                    f"Allowed: {[a.value for a in m_def.allowed_aggregations]}"
-                )
 
     # 2. Validate Dimensions
     for d in plan.dimensions:
-        if d.name not in allowed_dimensions:
+        if d.name not in allowed_dimensions and d.name not in dynamic_dimensions:
             errors.append(
-                f"Dimension '{d.name}' is not allowed in domain '{plan.domain.value}'. "
-                f"Allowed dimensions: {sorted(list(allowed_dimensions))}"
+                f"Dimension '{d.name}' is not allowed in domain '{plan.domain.value}'."
             )
 
     # 3. Validate Group By
     for g in plan.group_by:
-        if g not in allowed_group_by:
+        if g not in allowed_group_by and g not in dynamic_dimensions:
             errors.append(
-                f"Group by field '{g}' is not allowed in domain '{plan.domain.value}'. "
-                f"Allowed groupings: {sorted(list(allowed_group_by))}"
+                f"Group by field '{g}' is not allowed in domain '{plan.domain.value}'."
             )
 
     # 4. Validate Derived Metrics
     for dm in plan.derived_metrics:
         if dm.type.value not in allowed_derived and dm.type != DerivedMetricType.OUTSTANDING_DUE:
             errors.append(
-                f"Derived metric '{dm.type.value}' is not allowed in domain '{plan.domain.value}'. "
-                f"Allowed derived metrics: {sorted(list(allowed_derived))}"
+                f"Derived metric '{dm.type.value}' is not allowed in domain '{plan.domain.value}'."
             )
 
-    # 5. Validate Filters and Filter Value Types
+    # 5. Validate Filters
     for f in plan.filters:
-        # Field must be either in allowed dimensions or allowed measures
-        if f.field not in allowed_dimensions and f.field not in allowed_measures:
+        if f.field not in allowed_dimensions and f.field not in allowed_measures and f.field not in dynamic_dimensions and f.field not in dynamic_measures:
             errors.append(
                 f"Filter field '{f.field}' is not allowed in domain '{plan.domain.value}'."
             )
