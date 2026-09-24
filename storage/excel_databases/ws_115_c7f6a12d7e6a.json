@@ -1,0 +1,59 @@
+{
+  "file_id": "c7f6a12d7e6a",
+  "filename": "15_large_fixture.xlsx",
+  "db_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/storage/excel_databases/ws_115_c7f6a12d7e6a.sqlite",
+  "db_filename": "ws_115_c7f6a12d7e6a.sqlite",
+  "workspace_id": 115,
+  "conversation_id": null,
+  "sheets_count": 1,
+  "total_rows": 100,
+  "tables": {
+    "sheet1": {
+      "sheet_title": "Sheet1",
+      "table_name": "sheet1",
+      "row_count": 100,
+      "columns": [
+        "row_id",
+        "sku",
+        "revenue",
+        "units"
+      ],
+      "original_columns": [
+        "row_id",
+        "sku",
+        "revenue",
+        "units"
+      ],
+      "measures": [
+        "row_id",
+        "revenue",
+        "units"
+      ],
+      "dimensions": [
+        "sku"
+      ],
+      "sample_preview": [
+        {
+          "row_id": 1,
+          "sku": "SKU-0001",
+          "revenue": 150,
+          "units": 2
+        },
+        {
+          "row_id": 2,
+          "sku": "SKU-0002",
+          "revenue": 300,
+          "units": 3
+        },
+        {
+          "row_id": 3,
+          "sku": "SKU-0003",
+          "revenue": 450,
+          "units": 4
+        }
+      ]
+    }
+  },
+  "schema_catalog": "### Uploaded Excel File: `15_large_fixture.xlsx` (Virtual Database)\nTotal Sheets/Tables: 1, Total Records: 100\n\n- **Table/Sheet `sheet1`** (Original: \"Sheet1\", 100 rows):\n  - Columns: row_id, sku, revenue, units\n  - Numeric Measures: row_id, revenue, units\n  - Text/Dimensions: sku",
+  "created_at": 1790242133.481056
+}

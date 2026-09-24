@@ -160,6 +160,22 @@ class FuzzyEntityResolver:
                         best_score = token_ratio
                         best_candidate = c
 
+        # Ambiguity guard: Check if second-best candidate is too close
+        scored_candidates = []
+        for c in candidates:
+            c_lower = c.lower()
+            ratio = difflib.SequenceMatcher(None, raw_lower, c_lower).ratio()
+            scored_candidates.append((c, ratio))
+
+        scored_candidates.sort(key=lambda x: x[1], reverse=True)
+        if len(scored_candidates) >= 2:
+            top1_c, top1_s = scored_candidates[0]
+            top2_c, top2_s = scored_candidates[1]
+            # If top 2 are distinct and score difference is tiny (<0.06) with imperfect match (<0.90)
+            if top1_c.lower() != top2_c.lower() and (top1_s - top2_s < 0.06) and top1_s < 0.88:
+                logger.info(f"[FuzzyEntityResolver] Ambiguity detected between '{top1_c}' and '{top2_c}' for query '{raw_str}' (margin: {top1_s - top2_s:.2f})")
+                return raw_str, 0.0
+
         if best_candidate and best_score >= threshold:
             logger.info(f"[FuzzyEntityResolver] Fuzzy resolved '{raw_str}' -> '{best_candidate}' (score: {best_score:.2f})")
             return best_candidate, best_score

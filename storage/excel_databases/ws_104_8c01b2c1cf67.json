@@ -1,0 +1,59 @@
+{
+  "file_id": "8c01b2c1cf67",
+  "filename": "04_dates.xlsx",
+  "db_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/storage/excel_databases/ws_104_8c01b2c1cf67.sqlite",
+  "db_filename": "ws_104_8c01b2c1cf67.sqlite",
+  "workspace_id": 104,
+  "conversation_id": null,
+  "sheets_count": 1,
+  "total_rows": 3,
+  "tables": {
+    "sheet1": {
+      "sheet_title": "Sheet1",
+      "table_name": "sheet1",
+      "row_count": 3,
+      "columns": [
+        "order_id",
+        "order_date",
+        "delivery_date",
+        "total"
+      ],
+      "original_columns": [
+        "order_id",
+        "order_date",
+        "delivery_date",
+        "total"
+      ],
+      "measures": [
+        "order_id",
+        "total"
+      ],
+      "dimensions": [
+        "order_date",
+        "delivery_date"
+      ],
+      "sample_preview": [
+        {
+          "order_id": 1001,
+          "order_date": "2026-01-15",
+          "delivery_date": "2026-01-18",
+          "total": 5000
+        },
+        {
+          "order_id": 1002,
+          "order_date": "2026-02-20",
+          "delivery_date": "2026-02-22",
+          "total": 8000
+        },
+        {
+          "order_id": 1003,
+          "order_date": "2026-03-25",
+          "delivery_date": "2026-03-28",
+          "total": 12000
+        }
+      ]
+    }
+  },
+  "schema_catalog": "### Uploaded Excel File: `04_dates.xlsx` (Virtual Database)\nTotal Sheets/Tables: 1, Total Records: 3\n\n- **Table/Sheet `sheet1`** (Original: \"Sheet1\", 3 rows):\n  - Columns: order_id, order_date, delivery_date, total\n  - Numeric Measures: order_id, total\n  - Text/Dimensions: order_date, delivery_date",
+  "created_at": 1790242199.9181912
+}

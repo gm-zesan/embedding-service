@@ -1,0 +1,98 @@
+{
+  "file_id": "7f91e57d16e9",
+  "filename": "02_multi_sheet.xlsx",
+  "db_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/storage/excel_databases/ws_102_7f91e57d16e9.sqlite",
+  "db_filename": "ws_102_7f91e57d16e9.sqlite",
+  "workspace_id": 102,
+  "conversation_id": null,
+  "sheets_count": 2,
+  "total_rows": 5,
+  "tables": {
+    "sales": {
+      "sheet_title": "Sales",
+      "table_name": "sales",
+      "row_count": 3,
+      "columns": [
+        "id",
+        "item_name",
+        "price",
+        "quantity"
+      ],
+      "original_columns": [
+        "id",
+        "item_name",
+        "price",
+        "quantity"
+      ],
+      "measures": [
+        "id",
+        "price",
+        "quantity"
+      ],
+      "dimensions": [
+        "item_name"
+      ],
+      "sample_preview": [
+        {
+          "id": 1,
+          "item_name": "Laptop",
+          "price": 75000,
+          "quantity": 2
+        },
+        {
+          "id": 2,
+          "item_name": "Mouse",
+          "price": 1500,
+          "quantity": 10
+        },
+        {
+          "id": 3,
+          "item_name": "Keyboard",
+          "price": 3500,
+          "quantity": 5
+        }
+      ]
+    },
+    "employees": {
+      "sheet_title": "Employees",
+      "table_name": "employees",
+      "row_count": 2,
+      "columns": [
+        "emp_id",
+        "name",
+        "department",
+        "salary"
+      ],
+      "original_columns": [
+        "emp_id",
+        "name",
+        "department",
+        "salary"
+      ],
+      "measures": [
+        "emp_id",
+        "salary"
+      ],
+      "dimensions": [
+        "name",
+        "department"
+      ],
+      "sample_preview": [
+        {
+          "emp_id": 101,
+          "name": "Zesan",
+          "department": "Tech",
+          "salary": 90000
+        },
+        {
+          "emp_id": 102,
+          "name": "Karim",
+          "department": "Accounts",
+          "salary": 60000
+        }
+      ]
+    }
+  },
+  "schema_catalog": "### Uploaded Excel File: `02_multi_sheet.xlsx` (Virtual Database)\nTotal Sheets/Tables: 2, Total Records: 5\n\n- **Table/Sheet `sales`** (Original: \"Sales\", 3 rows):\n  - Columns: id, item_name, price, quantity\n  - Numeric Measures: id, price, quantity\n  - Text/Dimensions: item_name\n- **Table/Sheet `employees`** (Original: \"Employees\", 2 rows):\n  - Columns: emp_id, name, department, salary\n  - Numeric Measures: emp_id, salary\n  - Text/Dimensions: name, department",
+  "created_at": 1790245540.72527
+}

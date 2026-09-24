@@ -1,0 +1,48 @@
+{
+  "file_id": "420f99648e15",
+  "filename": "12_special_headers.xlsx",
+  "db_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/storage/excel_databases/ws_112_420f99648e15.sqlite",
+  "db_filename": "ws_112_420f99648e15.sqlite",
+  "workspace_id": 112,
+  "conversation_id": null,
+  "sheets_count": 1,
+  "total_rows": 2,
+  "tables": {
+    "sheet1": {
+      "sheet_title": "Sheet1",
+      "table_name": "sheet1",
+      "row_count": 2,
+      "columns": [
+        "product_name_description",
+        "total_net",
+        "tax_rate"
+      ],
+      "original_columns": [
+        "Product Name / Description",
+        "Total ($) [Net]",
+        "Tax % Rate"
+      ],
+      "measures": [
+        "total_net",
+        "tax_rate"
+      ],
+      "dimensions": [
+        "product_name_description"
+      ],
+      "sample_preview": [
+        {
+          "product_name_description": "Monitor 27-inch",
+          "total_net": 250,
+          "tax_rate": 15
+        },
+        {
+          "product_name_description": "Keyboard RGB",
+          "total_net": 45,
+          "tax_rate": 10
+        }
+      ]
+    }
+  },
+  "schema_catalog": "### Uploaded Excel File: `12_special_headers.xlsx` (Virtual Database)\nTotal Sheets/Tables: 1, Total Records: 2\n\n- **Table/Sheet `sheet1`** (Original: \"Sheet1\", 2 rows):\n  - Columns: product_name_description, total_net, tax_rate\n  - Numeric Measures: total_net, tax_rate\n  - Text/Dimensions: product_name_description",
+  "created_at": 1790244992.2486699
+}

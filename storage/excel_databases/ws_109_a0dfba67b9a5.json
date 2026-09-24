@@ -1,0 +1,53 @@
+{
+  "file_id": "a0dfba67b9a5",
+  "filename": "09_bangla.xlsx",
+  "db_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/storage/excel_databases/ws_109_a0dfba67b9a5.sqlite",
+  "db_filename": "ws_109_a0dfba67b9a5.sqlite",
+  "workspace_id": 109,
+  "conversation_id": null,
+  "sheets_count": 1,
+  "total_rows": 3,
+  "tables": {
+    "sheet1": {
+      "sheet_title": "Sheet1",
+      "table_name": "sheet1",
+      "row_count": 3,
+      "columns": [
+        "\u0986\u0987\u09a1",
+        "\u09a8\u09ae",
+        "\u09ac\u0995\u09b0_\u09aa\u09b0\u09ae\u09a3"
+      ],
+      "original_columns": [
+        "\u0986\u0987\u09a1\u09bf",
+        "\u09a8\u09be\u09ae",
+        "\u09ac\u09bf\u0995\u09cd\u09b0\u09bf_\u09aa\u09b0\u09bf\u09ae\u09be\u09a3"
+      ],
+      "measures": [
+        "\u0986\u0987\u09a1",
+        "\u09ac\u0995\u09b0_\u09aa\u09b0\u09ae\u09a3"
+      ],
+      "dimensions": [
+        "\u09a8\u09ae"
+      ],
+      "sample_preview": [
+        {
+          "\u0986\u0987\u09a1": 1,
+          "\u09a8\u09ae": "\u09b9\u09be\u09b8\u09be\u09a8",
+          "\u09ac\u0995\u09b0_\u09aa\u09b0\u09ae\u09a3": 25000
+        },
+        {
+          "\u0986\u0987\u09a1": 2,
+          "\u09a8\u09ae": "\u09b0\u09ab\u09bf\u0995",
+          "\u09ac\u0995\u09b0_\u09aa\u09b0\u09ae\u09a3": 18000
+        },
+        {
+          "\u0986\u0987\u09a1": 3,
+          "\u09a8\u09ae": "\u0995\u09b0\u09bf\u09ae",
+          "\u09ac\u0995\u09b0_\u09aa\u09b0\u09ae\u09a3": 35000
+        }
+      ]
+    }
+  },
+  "schema_catalog": "### Uploaded Excel File: `09_bangla.xlsx` (Virtual Database)\nTotal Sheets/Tables: 1, Total Records: 3\n\n- **Table/Sheet `sheet1`** (Original: \"Sheet1\", 3 rows):\n  - Columns: \u0986\u0987\u09a1, \u09a8\u09ae, \u09ac\u0995\u09b0_\u09aa\u09b0\u09ae\u09a3\n  - Numeric Measures: \u0986\u0987\u09a1, \u09ac\u0995\u09b0_\u09aa\u09b0\u09ae\u09a3\n  - Text/Dimensions: \u09a8\u09ae",
+  "created_at": 1790246758.798516
+}

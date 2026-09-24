@@ -38,6 +38,11 @@ class AutoCatalogingEngine:
             "failed_jobs", "job_batches", "jobs", "migrations",
             "password_reset_tokens", "sessions", "cache", "cache_locks"
         }
+        # Excluded sensitive authentication / secret columns
+        self.excluded_columns: Set[str] = {
+            "password", "password_hash", "remember_token", "access_token",
+            "refresh_token", "secret", "api_key", "token"
+        }
 
     def _get_connection(self):
         return pymysql.connect(
@@ -138,6 +143,8 @@ class AutoCatalogingEngine:
                         for col in cols:
                             c_name = col["COLUMN_NAME"]
                             d_type = col["DATA_TYPE"].lower()
+                            if c_name in self.excluded_columns:
+                                continue
                             c_key = col["COLUMN_KEY"]
 
                             # Auto-Classify field types
