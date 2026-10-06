@@ -1,0 +1,72 @@
+{
+  "workspace_id": 102,
+  "source_id": "327ddba8bb0a",
+  "original_filename": "02_multi_sheet.xlsx",
+  "format": "xlsx",
+  "stored_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/tests/fixtures/excel/02_multi_sheet.xlsx",
+  "uploaded_at": "2026-10-06 14:18:32",
+  "file_hash": "327ddba8bb0a",
+  "datasets": [
+    {
+      "dataset_id": "sales",
+      "dataset_name": "Sales",
+      "sheet_name": "Sales",
+      "page_range": null,
+      "columns": [
+        "id",
+        "item_name",
+        "price",
+        "quantity"
+      ],
+      "data_types": {
+        "id": "NUMERIC",
+        "item_name": "TEXT",
+        "price": "NUMERIC",
+        "quantity": "NUMERIC"
+      },
+      "numeric_measures": [
+        "id",
+        "price",
+        "quantity"
+      ],
+      "text_dimensions": [
+        "item_name"
+      ],
+      "date_fields": [],
+      "row_count": 3,
+      "storage_reference": "sales"
+    },
+    {
+      "dataset_id": "employees",
+      "dataset_name": "Employees",
+      "sheet_name": "Employees",
+      "page_range": null,
+      "columns": [
+        "emp_id",
+        "name",
+        "department",
+        "salary"
+      ],
+      "data_types": {
+        "emp_id": "NUMERIC",
+        "name": "TEXT",
+        "department": "TEXT",
+        "salary": "NUMERIC"
+      },
+      "numeric_measures": [
+        "emp_id",
+        "salary"
+      ],
+      "text_dimensions": [
+        "name",
+        "department"
+      ],
+      "date_fields": [],
+      "row_count": 2,
+      "storage_reference": "employees"
+    }
+  ],
+  "schema_summary": "### Uploaded File: `02_multi_sheet.xlsx` (Virtual Database)\nTotal Sheets/Tables: 2, Total Records: 5\n\n- **Table/Sheet `sales`** (Original: \"Sales\", 3 rows):\n  - Columns: id, item_name, price, quantity\n  - Numeric Measures: id, price, quantity\n  - Text/Dimensions: item_name\n- **Table/Sheet `employees`** (Original: \"Employees\", 2 rows):\n  - Columns: emp_id, name, department, salary\n  - Numeric Measures: emp_id, salary\n  - Text/Dimensions: name, department",
+  "total_rows": 5,
+  "db_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/storage/excel_databases/ws_102_327ddba8bb0a.sqlite"
+}

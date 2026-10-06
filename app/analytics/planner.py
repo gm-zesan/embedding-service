@@ -131,7 +131,12 @@ REGISTERED SEMANTIC VOCABULARY:
    - "Who is assigned to collect Rahim's due?" -> domain: "due_assignment", filters: [{"field": "customer", "operator": "=", "value": "Rahim"}]
    - "How many active assignments are there?" -> domain: "due_assignment", measures: [{"name": "active_assignment_count"}]
 
-5. Ambiguity Handling:
+5. Entity Transliteration & Language Invariant:
+   - Names of salespersons and customers in database are canonical Latin strings (e.g. "Hasan", "Rakib", "Tarek", "Mehedi", "Rahim", "Karim", "Jamila", "Rafiq", "Anis").
+   - When the user asks questions in Bengali script (e.g. "রাকিব", "হাসান", "তারেক", "রহিম", "করিম"), ALWAYS transliterate and map the filter value to the canonical English Latin name (e.g. "রাকিব" -> "Rakib", "হাসান" -> "Hasan", "তারেক" -> "Tarek", "মেহেদী" -> "Mehedi", "রহিম" -> "Rahim", "করিম" -> "Karim").
+   - When the user refers to an entity using pronouns (e.g. "তার", "his", "her", "tader", "their") in a multi-turn conversation, resolve the antecedent name and time filter from <RECENT_CONVERSATION_CONTEXT>.
+
+6. Ambiguity Handling:
    - If a question is genuinely underspecified:
      * "Hasan er report dao" (without specifying sales or collection):
        Set: "needs_clarification": true, "clarification_options": ["Hasan's total sales", "Hasan's collections"], "clarification_message": "Did you mean Hasan's sales or cash collections?"

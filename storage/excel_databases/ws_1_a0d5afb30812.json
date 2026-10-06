@@ -1,0 +1,365 @@
+{
+  "file_id": "a0d5afb30812",
+  "filename": "business_test_multitab.xlsx",
+  "db_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/storage/excel_databases/ws_1_a0d5afb30812.sqlite",
+  "db_filename": "ws_1_a0d5afb30812.sqlite",
+  "workspace_id": 1,
+  "conversation_id": null,
+  "sheets_count": 5,
+  "total_rows": 43,
+  "tables": {
+    "sales_transactions": {
+      "sheet_title": "Sales_Transactions",
+      "table_name": "sales_transactions",
+      "row_count": 12,
+      "columns": [
+        "date",
+        "invoice_id",
+        "customer_name",
+        "salesperson",
+        "product_name",
+        "category",
+        "quantity",
+        "unit_price",
+        "total_amount",
+        "payment_method",
+        "status"
+      ],
+      "original_columns": [
+        "Date",
+        "Invoice_ID",
+        "Customer_Name",
+        "Salesperson",
+        "Product_Name",
+        "Category",
+        "Quantity",
+        "Unit_Price",
+        "Total_Amount",
+        "Payment_Method",
+        "Status"
+      ],
+      "measures": [
+        "quantity",
+        "unit_price",
+        "total_amount"
+      ],
+      "dimensions": [
+        "date",
+        "invoice_id",
+        "customer_name",
+        "salesperson",
+        "product_name",
+        "category",
+        "payment_method",
+        "status"
+      ],
+      "sample_preview": [
+        {
+          "date": "2026-10-01",
+          "invoice_id": "INV-1001",
+          "customer_name": "Rakib Hasan",
+          "salesperson": "Md. Tanvir",
+          "product_name": "Basmati Rice 25kg",
+          "category": "Grains",
+          "quantity": 10,
+          "unit_price": 2600,
+          "total_amount": 26000,
+          "payment_method": "cash",
+          "status": "Completed"
+        },
+        {
+          "date": "2026-10-01",
+          "invoice_id": "INV-1002",
+          "customer_name": "Karim Ullah",
+          "salesperson": "Rakib Hasan",
+          "product_name": "Soybean Oil 5L",
+          "category": "Edible Oil",
+          "quantity": 25,
+          "unit_price": 820,
+          "total_amount": 20500,
+          "payment_method": "bkash",
+          "status": "Completed"
+        },
+        {
+          "date": "2026-10-02",
+          "invoice_id": "INV-1003",
+          "customer_name": "Hasan Mahmud",
+          "salesperson": "Md. Tanvir",
+          "product_name": "Miniket Rice 50kg",
+          "category": "Grains",
+          "quantity": 15,
+          "unit_price": 3400,
+          "total_amount": 51000,
+          "payment_method": "bank",
+          "status": "Completed"
+        }
+      ]
+    },
+    "cash_collections": {
+      "sheet_title": "Cash_Collections",
+      "table_name": "cash_collections",
+      "row_count": 10,
+      "columns": [
+        "date",
+        "collection_id",
+        "customer_name",
+        "collector_salesperson",
+        "collection_amount",
+        "payment_method",
+        "reference_notes"
+      ],
+      "original_columns": [
+        "Date",
+        "Collection_ID",
+        "Customer_Name",
+        "Collector_Salesperson",
+        "Collection_Amount",
+        "Payment_Method",
+        "Reference_Notes"
+      ],
+      "measures": [
+        "collection_amount"
+      ],
+      "dimensions": [
+        "date",
+        "collection_id",
+        "customer_name",
+        "collector_salesperson",
+        "payment_method",
+        "reference_notes"
+      ],
+      "sample_preview": [
+        {
+          "date": "2026-10-01",
+          "collection_id": "COL-201",
+          "customer_name": "Rakib Hasan",
+          "collector_salesperson": "Md. Tanvir",
+          "collection_amount": 26000,
+          "payment_method": "cash",
+          "reference_notes": "Invoice INV-1001 full cash settlement"
+        },
+        {
+          "date": "2026-10-01",
+          "collection_id": "COL-202",
+          "customer_name": "Karim Ullah",
+          "collector_salesperson": "Rakib Hasan",
+          "collection_amount": 20500,
+          "payment_method": "bkash",
+          "reference_notes": "TrxID: 9X82K19A"
+        },
+        {
+          "date": "2026-10-02",
+          "collection_id": "COL-203",
+          "customer_name": "Hasan Mahmud",
+          "collector_salesperson": "Md. Tanvir",
+          "collection_amount": 30000,
+          "payment_method": "bank",
+          "reference_notes": "City Bank Cheque #49281"
+        }
+      ]
+    },
+    "product_inventory": {
+      "sheet_title": "Product_Inventory",
+      "table_name": "product_inventory",
+      "row_count": 8,
+      "columns": [
+        "product_id",
+        "product_name",
+        "category",
+        "stock_quantity",
+        "unit_cost_price",
+        "selling_price",
+        "supplier_name",
+        "reorder_level"
+      ],
+      "original_columns": [
+        "Product_ID",
+        "Product_Name",
+        "Category",
+        "Stock_Quantity",
+        "Unit_Cost_Price",
+        "Selling_Price",
+        "Supplier_Name",
+        "Reorder_Level"
+      ],
+      "measures": [
+        "stock_quantity",
+        "unit_cost_price",
+        "selling_price",
+        "reorder_level"
+      ],
+      "dimensions": [
+        "product_id",
+        "product_name",
+        "category",
+        "supplier_name"
+      ],
+      "sample_preview": [
+        {
+          "product_id": "PRD-01",
+          "product_name": "Basmati Rice 25kg",
+          "category": "Grains",
+          "stock_quantity": 140,
+          "unit_cost_price": 2250,
+          "selling_price": 2600,
+          "supplier_name": "Pran Agro Ltd",
+          "reorder_level": 25
+        },
+        {
+          "product_id": "PRD-02",
+          "product_name": "Miniket Rice 50kg",
+          "category": "Grains",
+          "stock_quantity": 85,
+          "unit_cost_price": 2950,
+          "selling_price": 3400,
+          "supplier_name": "Rashid Agro",
+          "reorder_level": 20
+        },
+        {
+          "product_id": "PRD-03",
+          "product_name": "Soybean Oil 5L",
+          "category": "Edible Oil",
+          "stock_quantity": 210,
+          "unit_cost_price": 710,
+          "selling_price": 820,
+          "supplier_name": "City Group (Teer)",
+          "reorder_level": 50
+        }
+      ]
+    },
+    "monthly_expenses": {
+      "sheet_title": "Monthly_Expenses",
+      "table_name": "monthly_expenses",
+      "row_count": 7,
+      "columns": [
+        "date",
+        "expense_id",
+        "expense_category",
+        "description",
+        "amount",
+        "paid_by",
+        "payment_method",
+        "status"
+      ],
+      "original_columns": [
+        "Date",
+        "Expense_ID",
+        "Expense_Category",
+        "Description",
+        "Amount",
+        "Paid_By",
+        "Payment_Method",
+        "Status"
+      ],
+      "measures": [
+        "amount"
+      ],
+      "dimensions": [
+        "date",
+        "expense_id",
+        "expense_category",
+        "description",
+        "paid_by",
+        "payment_method",
+        "status"
+      ],
+      "sample_preview": [
+        {
+          "date": "2026-10-01",
+          "expense_id": "EXP-301",
+          "expense_category": "Rent",
+          "description": "Warehouse & Store Rent for October",
+          "amount": 45000,
+          "paid_by": "Zesan Admin",
+          "payment_method": "bank",
+          "status": "Paid"
+        },
+        {
+          "date": "2026-10-02",
+          "expense_id": "EXP-302",
+          "expense_category": "Utilities",
+          "description": "Electricity Bill (DESCO)",
+          "amount": 8400,
+          "paid_by": "Md. Tanvir",
+          "payment_method": "bkash",
+          "status": "Paid"
+        },
+        {
+          "date": "2026-10-02",
+          "expense_id": "EXP-303",
+          "expense_category": "Logistics",
+          "description": "Truck freight delivery charge",
+          "amount": 6500,
+          "paid_by": "Fahim Ahmed",
+          "payment_method": "cash",
+          "status": "Paid"
+        }
+      ]
+    },
+    "customer_dues": {
+      "sheet_title": "Customer_Dues",
+      "table_name": "customer_dues",
+      "row_count": 6,
+      "columns": [
+        "customer_id",
+        "customer_name",
+        "phone_number",
+        "area_location",
+        "total_purchased_amount",
+        "total_paid_amount",
+        "current_due_amount"
+      ],
+      "original_columns": [
+        "Customer_ID",
+        "Customer_Name",
+        "Phone_Number",
+        "Area_Location",
+        "Total_Purchased_Amount",
+        "Total_Paid_Amount",
+        "Current_Due_Amount"
+      ],
+      "measures": [
+        "phone_number",
+        "total_purchased_amount",
+        "total_paid_amount",
+        "current_due_amount"
+      ],
+      "dimensions": [
+        "customer_id",
+        "customer_name",
+        "area_location"
+      ],
+      "sample_preview": [
+        {
+          "customer_id": "CUST-01",
+          "customer_name": "Rakib Hasan",
+          "phone_number": 1711001122,
+          "area_location": "Dhanmondi, Dhaka",
+          "total_purchased_amount": 53200,
+          "total_paid_amount": 53200,
+          "current_due_amount": NaN
+        },
+        {
+          "customer_id": "CUST-02",
+          "customer_name": "Hasan Mahmud",
+          "phone_number": 1819223344,
+          "area_location": "Uttara, Dhaka",
+          "total_purchased_amount": 51000,
+          "total_paid_amount": 30000,
+          "current_due_amount": 21000.0
+        },
+        {
+          "customer_id": "CUST-03",
+          "customer_name": "Karim Ullah",
+          "phone_number": 1912334455,
+          "area_location": "Mirpur, Dhaka",
+          "total_purchased_amount": 20500,
+          "total_paid_amount": 20500,
+          "current_due_amount": NaN
+        }
+      ]
+    }
+  },
+  "schema_catalog": "### Uploaded Excel File: `business_test_multitab.xlsx` (Virtual Database)\nTotal Sheets/Tables: 5, Total Records: 43\n\n- **Table/Sheet `sales_transactions`** (Original: \"Sales_Transactions\", 12 rows):\n  - Columns: date, invoice_id, customer_name, salesperson, product_name, category, quantity, unit_price, total_amount, payment_method, status\n  - Numeric Measures: quantity, unit_price, total_amount\n  - Text/Dimensions: date, invoice_id, customer_name, salesperson, product_name, category, payment_method, status\n- **Table/Sheet `cash_collections`** (Original: \"Cash_Collections\", 10 rows):\n  - Columns: date, collection_id, customer_name, collector_salesperson, collection_amount, payment_method, reference_notes\n  - Numeric Measures: collection_amount\n  - Text/Dimensions: date, collection_id, customer_name, collector_salesperson, payment_method, reference_notes\n- **Table/Sheet `product_inventory`** (Original: \"Product_Inventory\", 8 rows):\n  - Columns: product_id, product_name, category, stock_quantity, unit_cost_price, selling_price, supplier_name, reorder_level\n  - Numeric Measures: stock_quantity, unit_cost_price, selling_price, reorder_level\n  - Text/Dimensions: product_id, product_name, category, supplier_name\n- **Table/Sheet `monthly_expenses`** (Original: \"Monthly_Expenses\", 7 rows):\n  - Columns: date, expense_id, expense_category, description, amount, paid_by, payment_method, status\n  - Numeric Measures: amount\n  - Text/Dimensions: date, expense_id, expense_category, description, paid_by, payment_method, status\n- **Table/Sheet `customer_dues`** (Original: \"Customer_Dues\", 6 rows):\n  - Columns: customer_id, customer_name, phone_number, area_location, total_purchased_amount, total_paid_amount, current_due_amount\n  - Numeric Measures: phone_number, total_purchased_amount, total_paid_amount, current_due_amount\n  - Text/Dimensions: customer_id, customer_name, area_location",
+  "created_at": 1791272190.2813382
+}

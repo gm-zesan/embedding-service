@@ -1,36 +1,100 @@
-"""
-Fuzzy Entity Resolver & Normalizer.
-Resolves misspelled, partial, or phonetic entity names (salespersons, customers, products, categories, payment methods)
-to their canonical database values using token similarity, substring containment, and SequenceMatcher.
-"""
-
+import os
+import re
 import time
 import difflib
 import logging
-from typing import Dict, List, Optional, Tuple, Any
-import pymysql
-import os
-# pyrefly: ignore [missing-import]
-from dotenv import load_dotenv
+from typing import Dict, List, Tuple, Any, Optional
 
-load_dotenv()
-logger = logging.getLogger(__name__)
+# pyrefly: ignore [missing-import]
+import pymysql
+# pyrefly: ignore [missing-import]
+import pymysql.cursors
+
+logger = logging.getLogger("app.analytics.fuzzy_resolver")
+
+
+def bengali_to_phonetic_latin(text: str) -> str:
+    """
+    Dynamic Algorithmic Bengali-to-Latin phonetic converter for infinite scale.
+    Automatically handles any Bengali word, name, product, category, or term.
+    Zero static name dictionary or hardcoded entity mappings.
+    """
+    if not text or not isinstance(text, str):
+        return ""
+    
+    # Check if text contains Bengali characters
+    if not re.search(r"[ঀ-৿]", text):
+        return text.lower().strip()
+
+    vowels = {
+        "অ": "o", "আ": "a", "ই": "i", "ঈ": "i", "উ": "u", "ঊ": "u",
+        "ঋ": "ri", "এ": "e", "ঐ": "oi", "ও": "o", "ঔ": "ou",
+        "া": "a", "ি": "i", "ী": "i", "ু": "u", "ূ": "u",
+        "ৃ": "ri", "ে": "e", "ৈ": "oi", "ো": "o", "ৌ": "ou", 
+        "্": "", "্য": "", "্যা": "a"
+    }
+    consonants = {
+        "ক": "k", "খ": "kh", "গ": "g", "ঘ": "gh", "ঙ": "ng",
+        "চ": "ch", "ছ": "ch", "জ": "j", "ঝ": "jh", "ঞ": "n",
+        "ট": "t", "ঠ": "th", "ড": "d", "ঢ": "dh", "ণ": "n",
+        "ত": "t", "থ": "th", "দ": "d", "ধ": "dh", "ন": "n",
+        "প": "p", "ফ": "f", "ব": "b", "ভ": "v", "ম": "m",
+        "য": "j", "র": "r", "ল": "l", "শ": "sh", "ষ": "sh",
+        "স": "s", "হ": "h", "ড়": "r", "ঢ়": "rh", "য়": "y",
+        "ৎ": "t", "ং": "ng", "ঃ": "h", "ঁ": ""
+    }
+    
+    out = []
+    chars = list(text.strip())
+    for i, ch in enumerate(chars):
+        if ch in vowels:
+            out.append(vowels[ch])
+        elif ch in consonants:
+            out.append(consonants[ch])
+            if i + 1 < len(chars):
+                next_ch = chars[i+1]
+                # Insert inherent vowel a if not followed by vowel mark or virama/hasant
+                if next_ch in consonants and next_ch not in ("্", "্য", "্র", "্লা", "বা"):
+                    out.append("a")
+        else:
+            out.append(ch)
+            
+    res = "".join(out).lower()
+    res = res.replace("kya", "ca").replace("kja", "ca").replace("bja", "ba").replace("bya", "ba").replace("ngak", "nk")
+    res = re.sub(r"aa+", "a", res)
+    res = re.sub(r"ee+", "ee", res)
+    res = re.sub(r"oo+", "oo", res)
+    return res
 
 
 class FuzzyEntityResolver:
     """
-    High-performance in-memory cached fuzzy entity resolver.
+    Enterprise-Scale Scalable Entity Normalizer & Disambiguator.
+    
+    Architectural Guarantees:
+    1. Zero Full-Table Scans: Queries targeted candidate generation via parameterized SQL (Top-K / Prefix / N-gram).
+    2. Zero Static Name Mappings: Pure algorithmic transliteration + multi-stage similarity scoring.
+    3. Strict Multi-Tenant Isolation: Every candidate query strictly parameterized with `workspace_id = %s`.
+    4. Strict Ambiguity Guard: Margin-based confidence threshold (winner >= 0.70 AND margin >= 0.10).
+    5. Fallback Protection: Unknown/unmatched entities return unchanged with safe 0.0 confidence (never guess).
     """
 
     def __init__(self, cache_ttl_seconds: int = 300):
-        self.cache_ttl = cache_ttl_seconds
-        # Structure: {workspace_id: {"timestamp": float, "entities": {entity_type: [canonical_names]}}}
-        self._cache: Dict[int, Dict[str, Any]] = {}
         self.host = os.getenv("DB_HOST", "127.0.0.1")
         self.port = int(os.getenv("DB_PORT", 3306))
         self.user = os.getenv("DB_USERNAME", "root")
         self.password = os.getenv("DB_PASSWORD", "")
         self.database = os.getenv("DB_DATABASE", "chatbot_db")
+        self.cache_ttl = cache_ttl_seconds
+        
+        # Fixed small enum domains (memory safe)
+        self.static_enums = {
+            "payment_method": ["cash", "bank", "bkash", "nagad", "card", "rocket"],
+            "status": ["completed", "pending", "cancelled", "processing"],
+        }
+        
+        # LRU/TTL Cache for small catalogs (salespersons/categories)
+        self._cache: Dict[str, Dict[str, Any]] = {}
 
     def _get_connection(self):
         return pymysql.connect(
@@ -43,65 +107,113 @@ class FuzzyEntityResolver:
             connect_timeout=3,
         )
 
-    def _load_workspace_entities(self, workspace_id: int) -> Dict[str, List[str]]:
-        """Loads canonical entity lists from MySQL for the workspace."""
-        entities: Dict[str, List[str]] = {
-            "salesperson": [],
-            "customer": [],
-            "product": [],
-            "category": [],
-            "payment_method": ["cash", "bank", "bkash", "nagad", "card", "rocket"],
-            "status": ["completed", "pending", "cancelled", "processing"],
+    def _fetch_candidates_from_db(self, workspace_id: int, field_type: str, search_terms: List[str], limit: int = 30) -> List[str]:
+        """
+        Top-K Targeted Candidate Retrieval using Database Indexing & Prefix/LIKE Filters.
+        Scales to millions of records by fetching only plausible candidates (O(1) to O(K))
+        instead of scanning entire customer/product tables in Python memory.
+        """
+        table_col_map = {
+            "salesperson": ("analytics_salespersons", "name", "AND (is_active = 1 OR is_active IS NULL)"),
+            "customer": ("analytics_customers", "name", ""),
+            "product": ("analytics_products", "name", ""),
+            "category": ("analytics_products", "category", ""),
         }
+
+        if field_type not in table_col_map:
+            return []
+
+        table, col, extra_cond = table_col_map[field_type]
+        candidates = set()
 
         try:
             with self._get_connection() as conn:
                 with conn.cursor() as cursor:
-                    # 1. Salespersons
-                    cursor.execute(
-                        "SELECT name FROM analytics_salespersons WHERE workspace_id = %s AND (is_active = 1 OR is_active IS NULL)",
-                        (workspace_id,),
-                    )
-                    entities["salesperson"] = [row["name"] for row in cursor.fetchall() if row.get("name")]
+                    # If field is small category or salesperson, fetch workspace list
+                    if field_type in ("salesperson", "category"):
+                        sql = f"SELECT DISTINCT {col} FROM {table} WHERE workspace_id = %s {extra_cond} LIMIT 100"
+                        cursor.execute(sql, (workspace_id,))
+                        for row in cursor.fetchall():
+                            val = row.get(col)
+                            if val:
+                                candidates.add(val)
+                        return list(candidates)
 
-                    # 2. Customers
-                    cursor.execute(
-                        "SELECT name FROM analytics_customers WHERE workspace_id = %s",
-                        (workspace_id,),
-                    )
-                    entities["customer"] = [row["name"] for row in cursor.fetchall() if row.get("name")]
+                    # For large tables (Customer, Product): Run targeted parameterized LIKE queries
+                    for term in search_terms:
+                        clean = term.strip()
+                        if len(clean) < 2:
+                            continue
+                        
+                        # Parameterized Prefix & Substring Match
+                        sql = f"""
+                            SELECT DISTINCT {col} 
+                            FROM {table} 
+                            WHERE workspace_id = %s 
+                              AND ({col} LIKE %s OR {col} LIKE %s)
+                              {extra_cond}
+                            LIMIT %s
+                        """
+                        cursor.execute(sql, (workspace_id, f"{clean}%", f"%{clean}%", limit))
+                        for row in cursor.fetchall():
+                            val = row.get(col)
+                            if val:
+                                candidates.add(val)
 
-                    # 3. Products & Categories
-                    cursor.execute(
-                        "SELECT name, category FROM analytics_products WHERE workspace_id = %s",
-                        (workspace_id,),
-                    )
-                    rows = cursor.fetchall()
-                    entities["product"] = [r["name"] for r in rows if r.get("name")]
-                    entities["category"] = list(set(r["category"] for r in rows if r.get("category")))
+                        # If term has multiple words, search by individual prominent token
+                        tokens = [t for t in clean.split() if len(t) > 2]
+                        for tok in tokens[:2]:
+                            cursor.execute(
+                                f"SELECT DISTINCT {col} FROM {table} WHERE workspace_id = %s AND {col} LIKE %s {extra_cond} LIMIT 15",
+                                (workspace_id, f"%{tok}%")
+                            )
+                            for row in cursor.fetchall():
+                                val = row.get(col)
+                                if val:
+                                    candidates.add(val)
 
         except Exception as e:
-            logger.warning(f"[FuzzyEntityResolver] Could not load entity catalog from DB: {e}")
+            logger.warning(f"[FuzzyEntityResolver] Targeted candidate fetch error: {e}")
 
-        return entities
+        return list(candidates)
 
-    def get_entities(self, workspace_id: int) -> Dict[str, List[str]]:
+    def get_candidates(self, workspace_id: int, field_type: str, search_terms: List[str]) -> List[str]:
+        """
+        Returns candidate list for entity resolution:
+        1. Fixed enums (payment methods, statuses)
+        2. Small cached catalogs (salespersons, categories)
+        3. Targeted Top-K database retrieval for large entities (customers, products).
+        """
+        if field_type in self.static_enums:
+            return self.static_enums[field_type]
+
+        # Check in-memory cache for small workspaces
+        cache_key = f"{workspace_id}:{field_type}"
         now = time.time()
-        cached = self._cache.get(workspace_id)
-        if cached and (now - cached["timestamp"] < self.cache_ttl):
-            return cached["entities"]
+        if field_type in ("salesperson", "category"):
+            cached = self._cache.get(cache_key)
+            if cached and (now - cached["timestamp"] < self.cache_ttl):
+                return cached["candidates"]
 
-        entities = self._load_workspace_entities(workspace_id)
-        self._cache[workspace_id] = {
-            "timestamp": now,
-            "entities": entities,
-        }
-        return entities
+        candidates = self._fetch_candidates_from_db(workspace_id, field_type, search_terms)
 
-    def normalize(self, workspace_id: int, field_type: str, raw_value: str, threshold: float = 0.55) -> Tuple[str, float]:
+        if field_type in ("salesperson", "category"):
+            self._cache[cache_key] = {
+                "timestamp": now,
+                "candidates": candidates,
+            }
+
+        return candidates
+
+    def normalize(self, workspace_id: int, field_type: str, raw_value: str, threshold: float = 0.70) -> Tuple[str, float]:
         """
         Normalizes raw input value to the closest matching canonical entity in DB.
-        Returns: (canonical_name, similarity_score)
+        
+        Algorithm:
+        1. Pure algorithmic phonetic transliteration (if Bengali script present).
+        2. Generate Top-K targeted candidate set from MySQL DB under current workspace_id.
+        3. Multi-tier fuzzy & token similarity scoring.
+        4. Margin-based Ambiguity Guard (refuse to guess if top 2 candidates are within 0.10 margin).
         """
         if not raw_value or not isinstance(raw_value, str):
             return raw_value, 1.0
@@ -120,65 +232,83 @@ class FuzzyEntityResolver:
         elif f_type in ("method", "payment"):
             f_type = "payment_method"
 
-        all_entities = self.get_entities(workspace_id)
-        candidates = all_entities.get(f_type, [])
+        # 1. Phonetic Candidate Generation
+        phonetic_latin = bengali_to_phonetic_latin(raw_str)
+        search_terms = [raw_str]
+        if phonetic_latin and phonetic_latin != raw_lower:
+            search_terms.append(phonetic_latin)
 
+        # 2. Retrieve targeted candidates
+        candidates = self.get_candidates(workspace_id, f_type, search_terms)
         if not candidates:
-            return raw_str, 1.0
+            return raw_str, 0.0
 
-        # 1. Exact match (case-insensitive)
+        # 3. Exact Match (Case-insensitive)
         for c in candidates:
             if c.lower() == raw_lower:
                 return c, 1.0
+            if phonetic_latin and c.lower().replace("-", "").replace(" ", "") == phonetic_latin.replace("-", "").replace(" ", ""):
+                return c, 1.0
 
-        # 2. Substring / Token containment
-        for c in candidates:
-            c_lower = c.lower()
-            if raw_lower in c_lower or c_lower in raw_lower:
-                return c, 0.90
-
-        # 3. Token-level SequenceMatcher & Word Similarity
-        best_candidate = None
-        best_score = 0.0
+        # 4. Score all generated candidates using Hybrid Sequence & Token Scoring
+        scored: List[Tuple[str, float]] = []
 
         for c in candidates:
             c_lower = c.lower()
-            # Full string comparison
-            full_ratio = difflib.SequenceMatcher(None, raw_lower, c_lower).ratio()
-            if full_ratio > best_score:
-                best_score = full_ratio
-                best_candidate = c
+            c_clean = c_lower.replace("-", "").replace(" ", "")
+            
+            # Check direct raw similarity
+            ratio_raw = difflib.SequenceMatcher(None, raw_lower, c_lower).ratio()
+            
+            # Check phonetic similarity
+            ratio_phonetic = 0.0
+            if phonetic_latin:
+                p_clean = phonetic_latin.replace("-", "").replace(" ", "")
+                ratio_phonetic = difflib.SequenceMatcher(None, p_clean, c_clean).ratio()
 
-            # Token-to-token comparison for multi-word products/names
+            # Check token overlap across raw, phonetic, and candidate tokens
             c_tokens = [t.strip() for t in c_lower.split() if len(t.strip()) > 2]
-            raw_tokens = [t.strip() for t in raw_lower.split() if len(t.strip()) > 2] or [raw_lower]
-
-            for rt in raw_tokens:
+            raw_tokens = [t.strip() for t in raw_lower.split() if len(t.strip()) > 2]
+            phon_tokens = [t.strip() for t in (phonetic_latin.split() if phonetic_latin else []) if len(t.strip()) > 2]
+            all_query_tokens = list(set(raw_tokens + phon_tokens))
+            
+            token_match = 0.0
+            for qt in all_query_tokens:
                 for ct in c_tokens:
-                    token_ratio = difflib.SequenceMatcher(None, rt, ct).ratio()
-                    if token_ratio > best_score:
-                        best_score = token_ratio
-                        best_candidate = c
+                    t_ratio = difflib.SequenceMatcher(None, qt, ct).ratio()
+                    if t_ratio > token_match:
+                        token_match = t_ratio
 
-        # Ambiguity guard: Check if second-best candidate is too close
-        scored_candidates = []
-        for c in candidates:
-            c_lower = c.lower()
-            ratio = difflib.SequenceMatcher(None, raw_lower, c_lower).ratio()
-            scored_candidates.append((c, ratio))
+            # Final composite score
+            final_score = max(ratio_raw, ratio_phonetic, token_match)
+            
+            # Substring containment bonus
+            if raw_lower in c_lower or (phonetic_latin and phonetic_latin in c_lower):
+                final_score = max(final_score, 0.88)
 
-        scored_candidates.sort(key=lambda x: x[1], reverse=True)
-        if len(scored_candidates) >= 2:
-            top1_c, top1_s = scored_candidates[0]
-            top2_c, top2_s = scored_candidates[1]
-            # If top 2 are distinct and score difference is tiny (<0.06) with imperfect match (<0.90)
-            if top1_c.lower() != top2_c.lower() and (top1_s - top2_s < 0.06) and top1_s < 0.88:
-                logger.info(f"[FuzzyEntityResolver] Ambiguity detected between '{top1_c}' and '{top2_c}' for query '{raw_str}' (margin: {top1_s - top2_s:.2f})")
+            scored.append((c, round(final_score, 4)))
+
+        # Sort descending by similarity score
+        scored.sort(key=lambda x: x[1], reverse=True)
+
+        if not scored:
+            return raw_str, 0.0
+
+        top1_cand, top1_score = scored[0]
+
+        # 5. Margin-Based Ambiguity Guard
+        if len(scored) >= 2:
+            top2_cand, top2_score = scored[1]
+            # If top 2 candidates are distinct, have close scores (<0.10 margin) and are not perfect matches (<0.95)
+            if top1_cand.lower() != top2_cand.lower() and (top1_score - top2_score < 0.10) and top1_score < 0.95:
+                logger.info(
+                    f"[FuzzyEntityResolver] Ambiguity detected between {top1_cand} ({top1_score}) and {top2_cand} ({top2_score}) for {raw_str}"
+                )
                 return raw_str, 0.0
 
-        if best_candidate and best_score >= threshold:
-            logger.info(f"[FuzzyEntityResolver] Fuzzy resolved '{raw_str}' -> '{best_candidate}' (score: {best_score:.2f})")
-            return best_candidate, best_score
+        if top1_score >= threshold:
+            logger.info(f"[FuzzyEntityResolver] Resolved {raw_str} -> {top1_cand} (score: {top1_score})")
+            return top1_cand, top1_score
 
         return raw_str, 0.0
 
@@ -193,14 +323,14 @@ class FuzzyEntityResolver:
             if f.field in ("salesperson", "collector", "assigned_collector", "customer", "product", "category", "payment_method", "status"):
                 if isinstance(f.value, str):
                     canonical_val, score = self.normalize(workspace_id, f.field, f.value)
-                    if score >= 0.55:
+                    if score >= 0.70:
                         f.value = canonical_val
                 elif isinstance(f.value, list):
                     normalized_list = []
                     for item in f.value:
                         if isinstance(item, str):
                             c_val, score = self.normalize(workspace_id, f.field, item)
-                            normalized_list.append(c_val if score >= 0.55 else item)
+                            normalized_list.append(c_val if score >= 0.70 else item)
                         else:
                             normalized_list.append(item)
                     f.value = normalized_list

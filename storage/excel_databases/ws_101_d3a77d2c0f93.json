@@ -1,0 +1,54 @@
+{
+  "workspace_id": 101,
+  "source_id": "d3a77d2c0f93",
+  "original_filename": "sales.csv",
+  "format": "csv",
+  "stored_path": "/var/folders/xx/kn7qrwx100g9450th31dwq4r0000gn/T/tmpdrtariwk.csv",
+  "uploaded_at": "2026-10-06 14:02:19",
+  "file_hash": "d3a77d2c0f93",
+  "datasets": [
+    {
+      "dataset_id": "sheet1",
+      "dataset_name": "Sales",
+      "sheet_name": "Sheet1",
+      "page_range": null,
+      "columns": [
+        "date",
+        "invoice_id",
+        "product_name",
+        "customer_name",
+        "quantity",
+        "unit_price",
+        "total_amount"
+      ],
+      "data_types": {
+        "date": "TEXT",
+        "invoice_id": "TEXT",
+        "product_name": "TEXT",
+        "customer_name": "TEXT",
+        "quantity": "NUMERIC",
+        "unit_price": "NUMERIC",
+        "total_amount": "NUMERIC"
+      },
+      "numeric_measures": [
+        "quantity",
+        "unit_price",
+        "total_amount"
+      ],
+      "text_dimensions": [
+        "date",
+        "invoice_id",
+        "product_name",
+        "customer_name"
+      ],
+      "date_fields": [
+        "date"
+      ],
+      "row_count": 6,
+      "storage_reference": "sheet1"
+    }
+  ],
+  "schema_summary": "### Uploaded File: `sales.csv` (Virtual Database)\nTotal Sheets/Tables: 1, Total Records: 6\n\n- **Table/Sheet `sheet1`** (Original: \"Sheet1\", 6 rows):\n  - Columns: date, invoice_id, product_name, customer_name, quantity, unit_price, total_amount\n  - Numeric Measures: quantity, unit_price, total_amount\n  - Text/Dimensions: date, invoice_id, product_name, customer_name",
+  "total_rows": 6,
+  "db_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/storage/excel_databases/ws_101_d3a77d2c0f93.sqlite"
+}

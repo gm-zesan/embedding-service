@@ -1,0 +1,78 @@
+{
+  "workspace_id": 102,
+  "source_id": "fcadcdcd99c6",
+  "original_filename": "products_w2.xlsx",
+  "format": "xlsx",
+  "stored_path": "/var/folders/xx/kn7qrwx100g9450th31dwq4r0000gn/T/tmpa_kpemi9.xlsx",
+  "uploaded_at": "2026-10-06 14:02:26",
+  "file_hash": "fcadcdcd99c6",
+  "datasets": [
+    {
+      "dataset_id": "products",
+      "dataset_name": "Products",
+      "sheet_name": "Products",
+      "page_range": null,
+      "columns": [
+        "product_id",
+        "product_name",
+        "category",
+        "price",
+        "stock",
+        "sold_qty"
+      ],
+      "data_types": {
+        "product_id": "NUMERIC",
+        "product_name": "TEXT",
+        "category": "TEXT",
+        "price": "NUMERIC",
+        "stock": "NUMERIC",
+        "sold_qty": "NUMERIC"
+      },
+      "numeric_measures": [
+        "product_id",
+        "price",
+        "stock",
+        "sold_qty"
+      ],
+      "text_dimensions": [
+        "product_name",
+        "category"
+      ],
+      "date_fields": [],
+      "row_count": 5,
+      "storage_reference": "products"
+    },
+    {
+      "dataset_id": "suppliers",
+      "dataset_name": "Suppliers",
+      "sheet_name": "Suppliers",
+      "page_range": null,
+      "columns": [
+        "supplier_id",
+        "supplier_name",
+        "product_name",
+        "purchase_price"
+      ],
+      "data_types": {
+        "supplier_id": "NUMERIC",
+        "supplier_name": "TEXT",
+        "product_name": "TEXT",
+        "purchase_price": "NUMERIC"
+      },
+      "numeric_measures": [
+        "supplier_id",
+        "purchase_price"
+      ],
+      "text_dimensions": [
+        "supplier_name",
+        "product_name"
+      ],
+      "date_fields": [],
+      "row_count": 5,
+      "storage_reference": "suppliers"
+    }
+  ],
+  "schema_summary": "### Uploaded File: `products_w2.xlsx` (Virtual Database)\nTotal Sheets/Tables: 2, Total Records: 10\n\n- **Table/Sheet `products`** (Original: \"Products\", 5 rows):\n  - Columns: product_id, product_name, category, price, stock, sold_qty\n  - Numeric Measures: product_id, price, stock, sold_qty\n  - Text/Dimensions: product_name, category\n- **Table/Sheet `suppliers`** (Original: \"Suppliers\", 5 rows):\n  - Columns: supplier_id, supplier_name, product_name, purchase_price\n  - Numeric Measures: supplier_id, purchase_price\n  - Text/Dimensions: supplier_name, product_name",
+  "total_rows": 10,
+  "db_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/storage/excel_databases/ws_102_fcadcdcd99c6.sqlite"
+}
