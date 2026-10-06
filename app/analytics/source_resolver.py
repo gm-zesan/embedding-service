@@ -138,19 +138,11 @@ class DataSourceResolver:
                         reason=f"Resolved via active conversational context: {active_src.original_filename}",
                     )
 
-        # Step 5: Semantic Keyword & Column Match Across All Sources
-        matching_sources = self._score_sources_by_schema_match(clean_query, all_sources)
+        # Step 5: Document Indicator Query & Schema Matching
+        has_doc_ind = self._has_document_indicators(clean_query)
 
-        if len(matching_sources) == 1:
-            best_src, datasets = matching_sources[0]
-            return SourceResolutionResult(
-                status=ResolutionStatus.RESOLVED,
-                source_id=best_src.source_id,
-                source=best_src,
-                dataset_ids=[d.dataset_id for d in datasets],
-                selected_datasets=datasets,
-                reason=f"Resolved via strong semantic schema match: {best_src.original_filename}",
-            )
+        # Step 6: Semantic Keyword & Column Match Across All Sources
+        matching_sources = self._score_sources_by_schema_match(clean_query, all_sources)
 
         if len(matching_sources) > 1:
             candidate_list = [
@@ -181,17 +173,54 @@ class DataSourceResolver:
                 clarification_options=options,
             )
 
-        if len(all_sources) == 1:
-            single_src = all_sources[0]
-            selected_datasets = self._resolve_datasets_in_source(clean_query, single_src)
+        if len(matching_sources) == 1 and has_doc_ind:
+            best_src, datasets = matching_sources[0]
             return SourceResolutionResult(
                 status=ResolutionStatus.RESOLVED,
-                source_id=single_src.source_id,
-                source=single_src,
-                dataset_ids=[d.dataset_id for d in selected_datasets],
-                selected_datasets=selected_datasets,
-                reason=f"Resolved to the single available workspace source: {single_src.original_filename}",
+                source_id=best_src.source_id,
+                source=best_src,
+                dataset_ids=[d.dataset_id for d in datasets],
+                selected_datasets=datasets,
+                reason=f"Resolved via document indicator and semantic schema match: {best_src.original_filename}",
             )
+
+        if has_doc_ind:
+            if len(all_sources) == 1:
+                single_src = all_sources[0]
+                selected_datasets = self._resolve_datasets_in_source(clean_query, single_src)
+                return SourceResolutionResult(
+                    status=ResolutionStatus.RESOLVED,
+                    source_id=single_src.source_id,
+                    source=single_src,
+                    dataset_ids=[d.dataset_id for d in selected_datasets],
+                    selected_datasets=selected_datasets,
+                    reason=f"Resolved to single available workspace source via document indicators: {single_src.original_filename}",
+                )
+            elif len(all_sources) > 1:
+                candidate_list = [
+                    {
+                        "source_id": src.source_id,
+                        "filename": src.original_filename,
+                        "format": src.format.value,
+                        "matched_datasets": [d.dataset_name for d in src.datasets],
+                    }
+                    for src in all_sources
+                ]
+                options = [f"{src.original_filename} থেকে দেখাও" for src in all_sources[:4]]
+                items = [f"{idx+1}. `{src.original_filename}`" for idx, src in enumerate(all_sources[:4])]
+                items_str = "\n".join(items)
+                clarification_msg = (
+                    f"🤔 **Ambiguous Source Context**: একাধিক ফাইল আপলোড করা রয়েছে:\n"
+                    f"{items_str}\n\n"
+                    f"আপনি কোন ফাইলের তথ্য জানতে চাচ্ছেন অনুগ্রহ করে ফাইলের নাম উল্লেখ করুন।"
+                )
+                return SourceResolutionResult(
+                    status=ResolutionStatus.AMBIGUOUS,
+                    candidates=candidate_list,
+                    reason="Query references an uploaded document but multiple files exist. User clarification required.",
+                    clarification_message=clarification_msg,
+                    clarification_options=options,
+                )
 
         return SourceResolutionResult(
             status=ResolutionStatus.NOT_FOUND,
@@ -202,6 +231,15 @@ class DataSourceResolver:
             ),
             clarification_options=[f"{s.original_filename} ব্যবহার করো" for s in all_sources[:4]],
         )
+
+    def _has_document_indicators(self, query: str) -> bool:
+        q_lower = query.lower()
+        doc_indicators = [
+            "file", "files", "excel", "xlsx", "xls", "csv", "sheet", "sheets",
+            "spreadsheet", "document", "ফাইল", "শিট", "শীট", "এক্সেল", "স্প্রেডশিট",
+            "এই file", "এই excel", "এই ফাইল", "এই এক্সেল", "oi file", "oi excel", "ঐ ফাইল", "ওই ফাইল"
+        ]
+        return any(ind in q_lower for ind in doc_indicators)
 
     def _detect_cross_source_comparison(self, query: str, sources: List[DataSource]) -> Optional[List[DataSource]]:
         q_lower = query.lower()
@@ -225,31 +263,52 @@ class DataSourceResolver:
 
     def _match_source_by_query_mention(self, query: str, sources: List[DataSource]) -> Optional[DataSource]:
         q_lower = query.lower()
+        # 1. Exact full filename match (e.g. "sales.xlsx", "orders.csv")
         for s in sources:
             if s.original_filename.lower() in q_lower:
                 return s
 
-        for s in sources:
-            stem = os.path.splitext(s.original_filename.lower())[0]
-            clean_stem = re.sub(r"[^a-zA-Z0-9]", "", stem)
-            if len(clean_stem) >= 3:
-                patterns = [
-                    rf"\b{re.escape(stem)}\b",
-                    rf"{re.escape(clean_stem)}\s*(?:file|sheet|ফাইল|এর|e|te|the)",
-                ]
-                for p in patterns:
-                    if re.search(p, q_lower):
-                        return s
+        # 2. File stem match ONLY when accompanied by explicit document indicators
+        # Avoid matching generic metric words like "sales", "orders", "products" on their own
+        doc_markers = ["file", "files", "sheet", "sheets", "ফাইল", "শিট", "শীট", "excel", "এক্সেল", "csv", "xlsx"]
+        has_doc_marker = any(m in q_lower for m in doc_markers)
+
+        if has_doc_marker:
+            for s in sources:
+                stem = os.path.splitext(s.original_filename.lower())[0]
+                clean_stem = re.sub(r"[^a-zA-Z0-9]", "", stem)
+                if len(clean_stem) >= 3:
+                    patterns = [
+                        rf"\b{re.escape(stem)}\s*(?:file|files|sheet|sheets|ফাইল|শিট|শীট|excel|এক্সেল|csv|xlsx|এর|er|e|te|তে|এ)",
+                        rf"(?:file|files|sheet|sheets|ফাইল|শিট|শীট|excel|এক্সেল)\s*(?:of|from|e|te|এ|তে|এর|er)?\s*\b{re.escape(stem)}\b",
+                    ]
+                    for p in patterns:
+                        if re.search(p, q_lower):
+                            return s
         return None
 
     def _match_by_dataset_name(self, query: str, sources: List[DataSource]) -> Tuple[Optional[DataSource], Optional[Dataset]]:
         q_lower = query.lower()
+        sheet_markers = ["sheet", "sheets", "tab", "tabs", "শিট", "শীট", "ট্যাব", "পাতা", "পাতায়"]
+        has_sheet_marker = any(m in q_lower for m in sheet_markers)
+
         for s in sources:
             for d in s.datasets:
                 clean_name = d.dataset_name.lower()
                 clean_sheet = (d.sheet_name or "").lower()
-                if (clean_name in q_lower and len(clean_name) >= 4) or (clean_sheet in q_lower and len(clean_sheet) >= 4):
-                    return s, d
+
+                # 1. Match when sheet marker is present (e.g. "employees sheet", "sales tab")
+                if has_sheet_marker:
+                    for name in (clean_name, clean_sheet):
+                        if name and len(name) >= 3 and name in q_lower:
+                            return s, d
+
+                # 2. Match for multi-sheet workbooks where specific distinctive sheet name is mentioned
+                if len(s.datasets) > 1:
+                    for name in (clean_name, clean_sheet):
+                        if name and len(name) >= 4:
+                            if re.search(rf"\b{re.escape(name)}\b", q_lower):
+                                return s, d
         return None, None
 
     def _resolve_datasets_in_source(

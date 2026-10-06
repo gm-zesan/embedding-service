@@ -1,0 +1,228 @@
+{
+  "workspace_id": 1,
+  "source_id": "af33f84f29c0",
+  "original_filename": "business_test_multitab.xlsx",
+  "format": "xlsx",
+  "stored_path": "/var/folders/xx/kn7qrwx100g9450th31dwq4r0000gn/T/tmp4snpvawd.xlsx",
+  "uploaded_at": "2026-10-06 15:19:22",
+  "file_hash": "af33f84f29c0",
+  "datasets": [
+    {
+      "dataset_id": "sales_transactions",
+      "dataset_name": "Sales_Transactions",
+      "sheet_name": "Sales_Transactions",
+      "page_range": null,
+      "columns": [
+        "date",
+        "invoice_id",
+        "customer_name",
+        "salesperson",
+        "product_name",
+        "category",
+        "quantity",
+        "unit_price",
+        "total_amount",
+        "payment_method",
+        "status"
+      ],
+      "data_types": {
+        "date": "TEXT",
+        "invoice_id": "TEXT",
+        "customer_name": "TEXT",
+        "salesperson": "TEXT",
+        "product_name": "TEXT",
+        "category": "TEXT",
+        "quantity": "NUMERIC",
+        "unit_price": "NUMERIC",
+        "total_amount": "NUMERIC",
+        "payment_method": "TEXT",
+        "status": "TEXT"
+      },
+      "numeric_measures": [
+        "quantity",
+        "unit_price",
+        "total_amount"
+      ],
+      "text_dimensions": [
+        "date",
+        "invoice_id",
+        "customer_name",
+        "salesperson",
+        "product_name",
+        "category",
+        "payment_method",
+        "status"
+      ],
+      "date_fields": [
+        "date"
+      ],
+      "row_count": 12,
+      "storage_reference": "sales_transactions"
+    },
+    {
+      "dataset_id": "cash_collections",
+      "dataset_name": "Cash_Collections",
+      "sheet_name": "Cash_Collections",
+      "page_range": null,
+      "columns": [
+        "date",
+        "collection_id",
+        "customer_name",
+        "collector_salesperson",
+        "collection_amount",
+        "payment_method",
+        "reference_notes"
+      ],
+      "data_types": {
+        "date": "TEXT",
+        "collection_id": "TEXT",
+        "customer_name": "TEXT",
+        "collector_salesperson": "TEXT",
+        "collection_amount": "NUMERIC",
+        "payment_method": "TEXT",
+        "reference_notes": "TEXT"
+      },
+      "numeric_measures": [
+        "collection_amount"
+      ],
+      "text_dimensions": [
+        "date",
+        "collection_id",
+        "customer_name",
+        "collector_salesperson",
+        "payment_method",
+        "reference_notes"
+      ],
+      "date_fields": [
+        "date"
+      ],
+      "row_count": 10,
+      "storage_reference": "cash_collections"
+    },
+    {
+      "dataset_id": "product_inventory",
+      "dataset_name": "Product_Inventory",
+      "sheet_name": "Product_Inventory",
+      "page_range": null,
+      "columns": [
+        "product_id",
+        "product_name",
+        "category",
+        "stock_quantity",
+        "unit_cost_price",
+        "selling_price",
+        "supplier_name",
+        "reorder_level"
+      ],
+      "data_types": {
+        "product_id": "TEXT",
+        "product_name": "TEXT",
+        "category": "TEXT",
+        "stock_quantity": "NUMERIC",
+        "unit_cost_price": "NUMERIC",
+        "selling_price": "NUMERIC",
+        "supplier_name": "TEXT",
+        "reorder_level": "NUMERIC"
+      },
+      "numeric_measures": [
+        "stock_quantity",
+        "unit_cost_price",
+        "selling_price",
+        "reorder_level"
+      ],
+      "text_dimensions": [
+        "product_id",
+        "product_name",
+        "category",
+        "supplier_name"
+      ],
+      "date_fields": [],
+      "row_count": 8,
+      "storage_reference": "product_inventory"
+    },
+    {
+      "dataset_id": "monthly_expenses",
+      "dataset_name": "Monthly_Expenses",
+      "sheet_name": "Monthly_Expenses",
+      "page_range": null,
+      "columns": [
+        "date",
+        "expense_id",
+        "expense_category",
+        "description",
+        "amount",
+        "paid_by",
+        "payment_method",
+        "status"
+      ],
+      "data_types": {
+        "date": "TEXT",
+        "expense_id": "TEXT",
+        "expense_category": "TEXT",
+        "description": "TEXT",
+        "amount": "NUMERIC",
+        "paid_by": "TEXT",
+        "payment_method": "TEXT",
+        "status": "TEXT"
+      },
+      "numeric_measures": [
+        "amount"
+      ],
+      "text_dimensions": [
+        "date",
+        "expense_id",
+        "expense_category",
+        "description",
+        "paid_by",
+        "payment_method",
+        "status"
+      ],
+      "date_fields": [
+        "date"
+      ],
+      "row_count": 7,
+      "storage_reference": "monthly_expenses"
+    },
+    {
+      "dataset_id": "customer_dues",
+      "dataset_name": "Customer_Dues",
+      "sheet_name": "Customer_Dues",
+      "page_range": null,
+      "columns": [
+        "customer_id",
+        "customer_name",
+        "phone_number",
+        "area_location",
+        "total_purchased_amount",
+        "total_paid_amount",
+        "current_due_amount"
+      ],
+      "data_types": {
+        "customer_id": "TEXT",
+        "customer_name": "TEXT",
+        "phone_number": "NUMERIC",
+        "area_location": "TEXT",
+        "total_purchased_amount": "NUMERIC",
+        "total_paid_amount": "NUMERIC",
+        "current_due_amount": "NUMERIC"
+      },
+      "numeric_measures": [
+        "phone_number",
+        "total_purchased_amount",
+        "total_paid_amount",
+        "current_due_amount"
+      ],
+      "text_dimensions": [
+        "customer_id",
+        "customer_name",
+        "area_location"
+      ],
+      "date_fields": [],
+      "row_count": 6,
+      "storage_reference": "customer_dues"
+    }
+  ],
+  "schema_summary": "### Uploaded File: `business_test_multitab.xlsx` (Virtual Database)\nTotal Sheets/Tables: 5, Total Records: 43\n\n- **Table/Sheet `sales_transactions`** (Original: \"Sales_Transactions\", 12 rows):\n  - Columns: date, invoice_id, customer_name, salesperson, product_name, category, quantity, unit_price, total_amount, payment_method, status\n  - Numeric Measures: quantity, unit_price, total_amount\n  - Text/Dimensions: date, invoice_id, customer_name, salesperson, product_name, category, payment_method, status\n- **Table/Sheet `cash_collections`** (Original: \"Cash_Collections\", 10 rows):\n  - Columns: date, collection_id, customer_name, collector_salesperson, collection_amount, payment_method, reference_notes\n  - Numeric Measures: collection_amount\n  - Text/Dimensions: date, collection_id, customer_name, collector_salesperson, payment_method, reference_notes\n- **Table/Sheet `product_inventory`** (Original: \"Product_Inventory\", 8 rows):\n  - Columns: product_id, product_name, category, stock_quantity, unit_cost_price, selling_price, supplier_name, reorder_level\n  - Numeric Measures: stock_quantity, unit_cost_price, selling_price, reorder_level\n  - Text/Dimensions: product_id, product_name, category, supplier_name\n- **Table/Sheet `monthly_expenses`** (Original: \"Monthly_Expenses\", 7 rows):\n  - Columns: date, expense_id, expense_category, description, amount, paid_by, payment_method, status\n  - Numeric Measures: amount\n  - Text/Dimensions: date, expense_id, expense_category, description, paid_by, payment_method, status\n- **Table/Sheet `customer_dues`** (Original: \"Customer_Dues\", 6 rows):\n  - Columns: customer_id, customer_name, phone_number, area_location, total_purchased_amount, total_paid_amount, current_due_amount\n  - Numeric Measures: phone_number, total_purchased_amount, total_paid_amount, current_due_amount\n  - Text/Dimensions: customer_id, customer_name, area_location",
+  "total_rows": 43,
+  "db_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/storage/excel_databases/ws_1_af33f84f29c0.sqlite"
+}

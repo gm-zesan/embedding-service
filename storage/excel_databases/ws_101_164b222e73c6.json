@@ -1,0 +1,43 @@
+{
+  "workspace_id": 101,
+  "source_id": "164b222e73c6",
+  "original_filename": "01_single_sheet.xlsx",
+  "format": "xlsx",
+  "stored_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/tests/fixtures/excel/01_single_sheet.xlsx",
+  "uploaded_at": "2026-10-06 16:57:18",
+  "file_hash": "164b222e73c6",
+  "datasets": [
+    {
+      "dataset_id": "products",
+      "dataset_name": "Products",
+      "sheet_name": "Products",
+      "page_range": null,
+      "columns": [
+        "id",
+        "item_name",
+        "price",
+        "quantity"
+      ],
+      "data_types": {
+        "id": "NUMERIC",
+        "item_name": "TEXT",
+        "price": "NUMERIC",
+        "quantity": "NUMERIC"
+      },
+      "numeric_measures": [
+        "id",
+        "price",
+        "quantity"
+      ],
+      "text_dimensions": [
+        "item_name"
+      ],
+      "date_fields": [],
+      "row_count": 3,
+      "storage_reference": "products"
+    }
+  ],
+  "schema_summary": "### Uploaded File: `01_single_sheet.xlsx` (Virtual Database)\nTotal Sheets/Tables: 1, Total Records: 3\n\n- **Table/Sheet `products`** (Original: \"Products\", 3 rows):\n  - Columns: id, item_name, price, quantity\n  - Numeric Measures: id, price, quantity\n  - Text/Dimensions: item_name",
+  "total_rows": 3,
+  "db_path": "/Users/zesan/Desktop/Entrepreneurs_Automation/python-ai-service/storage/excel_databases/ws_101_164b222e73c6.sqlite"
+}
