@@ -23,9 +23,14 @@ from .data_source import (
     DocumentAnalyticsContext,
     ResolutionStatus,
     SourceResolutionResult,
+    DatasetCategory,
+    DatasetClassification,
 )
 from .source_registry import DataSourceRegistry, source_registry
 from .source_resolver import DataSourceResolver, source_resolver
+from .dataset_classifier import dataset_classifier, DatasetClassifier
+from .semantic_schema import profile_dataset_columns
+from .semantic_interpreter import get_semantic_interpreter
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -60,7 +65,8 @@ class ExcelDatabaseEngine:
         file_path: str,
         original_filename: str,
         workspace_id: int,
-        conversation_id: Optional[str] = None
+        conversation_id: Optional[str] = None,
+        source_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Reads all sheets/tabs from Excel file or CSV, loads them as tables into an isolated SQLite database,
@@ -78,22 +84,50 @@ class ExcelDatabaseEngine:
         else:
             raise ValueError(f"Unsupported file format: {ext}. Only .xlsx, .xls, and .csv are supported.")
 
-        file_hash = hashlib.md5(f"{workspace_id}_{original_filename}_{time.time()}".encode()).hexdigest()[:12]
+        if source_id and str(source_id).strip():
+            file_hash = re.sub(r"[^\w\-]", "", str(source_id).strip())[:64]
+        else:
+            hasher = hashlib.md5()
+            try:
+                with open(file_path, "rb") as f:
+                    while chunk := f.read(65536):
+                        hasher.update(chunk)
+                content_digest = hasher.hexdigest()[:12]
+            except Exception:
+                content_digest = "content"
+            file_hash = hashlib.md5(f"{workspace_id}_{original_filename}_{content_digest}".encode()).hexdigest()[:12]
+
         db_filename = f"ws_{workspace_id}_{file_hash}.sqlite"
         db_path = os.path.join(self.storage_dir, db_filename)
 
         conn = sqlite3.connect(db_path)
         datasets: List[Dataset] = []
         tables_meta: Dict[str, Any] = {}
+        failed_sheets: List[Dict[str, str]] = []
         total_rows = 0
 
         try:
             for sheet in sheet_names:
                 table_name = self._sanitize_name(sheet) or "data_table"
                 if xls:
-                    df = pd.read_excel(xls, sheet_name=sheet)
+                    try:
+                        df = pd.read_excel(xls, sheet_name=sheet)
+                    except Exception as sheet_err:
+                        logger.warning(f"[ExcelEngine] Error reading sheet '{sheet}' from {original_filename}: {sheet_err}")
+                        failed_sheets.append({"sheet": sheet, "error": str(sheet_err)})
+                        continue
                 else:
-                    df = pd.read_csv(file_path)
+                    try:
+                        df = pd.read_csv(file_path, encoding="utf-8")
+                    except UnicodeDecodeError:
+                        try:
+                            df = pd.read_csv(file_path, encoding="utf-8-sig")
+                        except UnicodeDecodeError:
+                            df = pd.read_csv(file_path, encoding="latin1")
+
+                if df.empty and len(df.columns) == 0:
+                    failed_sheets.append({"sheet": sheet, "error": "Empty sheet or no columns"})
+                    continue
 
                 original_cols = list(df.columns)
                 clean_cols = [self._sanitize_name(c) for c in original_cols]
@@ -126,17 +160,54 @@ class ExcelDatabaseEngine:
                 row_count = len(df)
                 total_rows += row_count
 
+                date_cols = [c for c in final_cols if "date" in c.lower() or "time" in c.lower()]
+
+                # Deterministic profiling & semantic interpretation
+                dataset_display_name = sheet if sheet != "Sheet1" else os.path.splitext(original_filename)[0].replace("_", " ").title()
+                sample_data = df.head(10).to_dict(orient="records") if len(df) > 0 else []
+                profile = profile_dataset_columns(
+                    columns=final_cols,
+                    data_types=data_types,
+                    raw_sample_data=sample_data,
+                    row_count=row_count,
+                    dataset_name=dataset_display_name,
+                    sheet_name=sheet,
+                    original_filename=original_filename,
+                    workspace_id=workspace_id,
+                )
+                interpreter = get_semantic_interpreter()
+                semantic_schema = interpreter.interpret_schema(profile, dataset_id=table_name)
+
+                # Classify the dataset (backward-compatible)
+                classification = dataset_classifier.classify(
+                    columns=final_cols,
+                    data_types=data_types,
+                    numeric_measures=numeric_cols,
+                    text_dimensions=text_cols,
+                    date_fields=date_cols,
+                    sheet_name=sheet,
+                    original_filename=original_filename,
+                    sample_rows_count=row_count,
+                )
+
                 dataset = Dataset(
                     dataset_id=table_name,
-                    dataset_name=sheet if sheet != "Sheet1" else os.path.splitext(original_filename)[0].replace("_", " ").title(),
+                    dataset_name=dataset_display_name,
                     sheet_name=sheet,
                     columns=final_cols,
                     data_types=data_types,
                     numeric_measures=numeric_cols,
                     text_dimensions=text_cols,
-                    date_fields=[c for c in final_cols if "date" in c.lower() or "time" in c.lower()],
+                    date_fields=date_cols,
                     row_count=row_count,
                     storage_reference=table_name,
+                    parent_source_id=file_hash,
+                    workspace_id=workspace_id,
+                    original_filename=original_filename,
+                    classification=classification,
+                    semantic_schema=semantic_schema,
+                    created_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                    updated_at=time.strftime("%Y-%m-%d %H:%M:%S"),
                 )
                 datasets.append(dataset)
 
@@ -146,9 +217,17 @@ class ExcelDatabaseEngine:
                     "numeric_measures": numeric_cols,
                     "text_dimensions": text_cols,
                     "row_count": row_count,
+                    "category": classification.category.value,
+                    "confidence": classification.confidence,
+                    "domain": semantic_schema.domain,
+                    "purpose": semantic_schema.purpose,
+                    "primary_entity": semantic_schema.primary_entity,
                 }
         finally:
             conn.close()
+
+        if not datasets:
+            raise ValueError(f"No readable tabular data found in '{original_filename}'.")
 
         # Build schema catalog summary
         schema_lines = [
@@ -182,14 +261,21 @@ class ExcelDatabaseEngine:
         # Register in workspace-scoped registry
         self.registry.register_source(source)
 
+        msg = (
+            f"Successfully ingested '{original_filename}' with {len(datasets)} sheets and {total_rows} rows."
+            if not failed_sheets
+            else f"Partially ingested '{original_filename}': {len(datasets)} sheets succeeded, {len(failed_sheets)} sheets failed."
+        )
+
         return {
             "success": True,
-            "message": f"Successfully ingested '{original_filename}' with {len(datasets)} sheets and {total_rows} rows.",
+            "message": msg,
             "file_id": file_hash,
             "source_id": file_hash,
             "filename": original_filename,
             "sheets": [d.storage_reference for d in datasets],
             "sheets_count": len(datasets),
+            "failed_sheets": failed_sheets,
             "tables": tables_meta,
             "total_rows": total_rows,
             "schema_summary": schema_summary,

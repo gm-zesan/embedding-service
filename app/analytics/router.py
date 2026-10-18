@@ -109,6 +109,7 @@ async def upload_analytical_source(
     file: UploadFile = File(...),
     workspace_id: int = Form(...),
     conversation_id: Optional[str] = Form(None),
+    source_id: Optional[str] = Form(None),
 ):
     """
     Ingests an uploaded analytical document (XLSX, XLS, CSV).
@@ -135,6 +136,7 @@ async def upload_analytical_source(
             original_filename=filename,
             workspace_id=int(workspace_id),
             conversation_id=conversation_id,
+            source_id=source_id,
         )
         return result
     except Exception as e:

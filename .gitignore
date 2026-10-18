@@ -27,3 +27,10 @@ Thumbs.db
 
 # Model Cache (optional)
 .cache/
+
+# Storage & Runtime Databases
+/storage/*
+!/storage/.gitkeep
+!/storage/excel_databases/
+/storage/excel_databases/*
+!/storage/excel_databases/.gitkeep

@@ -131,24 +131,84 @@ class DataSourceRegistry:
         if int(data.get("workspace_id", workspace_id)) != workspace_id:
             return None
 
+        source_id = data.get("source_id") or data.get("file_id") or fallback_source_id
+        original_filename = data.get("original_filename") or data.get("filename") or "uploaded_data.xlsx"
+
         # Build Datasets
         datasets: List[Dataset] = []
         if "datasets" in data and isinstance(data["datasets"], list):
             for d in data["datasets"]:
-                datasets.append(Dataset(**d))
+                d_dict = dict(d)
+                d_dict.setdefault("parent_source_id", source_id)
+                d_dict.setdefault("workspace_id", workspace_id)
+                d_dict.setdefault("original_filename", original_filename)
+                if "classification" not in d_dict or not d_dict["classification"] or d_dict["classification"].get("category") == "unknown":
+                    from .dataset_classifier import dataset_classifier
+                    d_dict["classification"] = dataset_classifier.classify(
+                        columns=d_dict.get("columns", []),
+                        data_types=d_dict.get("data_types", {}),
+                        numeric_measures=d_dict.get("numeric_measures", []),
+                        text_dimensions=d_dict.get("text_dimensions", []),
+                        date_fields=d_dict.get("date_fields", []),
+                        sheet_name=d_dict.get("sheet_name"),
+                        original_filename=original_filename,
+                        sample_rows_count=d_dict.get("row_count", 0),
+                    ).model_dump()
+                if "semantic_schema" not in d_dict or not d_dict["semantic_schema"]:
+                    from .semantic_schema import profile_dataset_columns
+                    from .semantic_interpreter import get_semantic_interpreter
+                    prof = profile_dataset_columns(
+                        columns=d_dict.get("columns", []),
+                        data_types=d_dict.get("data_types", {}),
+                        row_count=d_dict.get("row_count", 0),
+                        dataset_name=d_dict.get("dataset_name", ""),
+                        sheet_name=d_dict.get("sheet_name"),
+                        original_filename=original_filename,
+                        workspace_id=workspace_id,
+                    )
+                    d_dict["semantic_schema"] = get_semantic_interpreter().interpret_schema(prof, d_dict.get("dataset_id", "")).model_dump()
+                datasets.append(Dataset(**d_dict))
         elif "tables" in data and isinstance(data["tables"], dict):
             # Legacy format conversion
+            from .dataset_classifier import dataset_classifier
+            from .semantic_schema import profile_dataset_columns
+            from .semantic_interpreter import get_semantic_interpreter
             for tbl_name, tbl_meta in data["tables"].items():
+                cols = tbl_meta.get("columns", [])
+                sheet_name = tbl_meta.get("original_sheet", tbl_name)
+                cls_res = dataset_classifier.classify(
+                    columns=cols,
+                    numeric_measures=tbl_meta.get("numeric_measures", []),
+                    text_dimensions=tbl_meta.get("text_dimensions", []),
+                    sheet_name=sheet_name,
+                    original_filename=original_filename,
+                    sample_rows_count=tbl_meta.get("row_count", 0),
+                )
+                prof = profile_dataset_columns(
+                    columns=cols,
+                    data_types={c: "NUMERIC" if c in tbl_meta.get("numeric_measures", []) else "TEXT" for c in cols},
+                    row_count=tbl_meta.get("row_count", 0),
+                    dataset_name=tbl_name.replace("_", " ").title(),
+                    sheet_name=sheet_name,
+                    original_filename=original_filename,
+                    workspace_id=workspace_id,
+                )
+                sem_schema = get_semantic_interpreter().interpret_schema(prof, tbl_name)
                 datasets.append(Dataset(
                     dataset_id=tbl_name,
                     dataset_name=tbl_name.replace("_", " ").title(),
-                    sheet_name=tbl_meta.get("original_sheet", tbl_name),
-                    columns=tbl_meta.get("columns", []),
+                    sheet_name=sheet_name,
+                    columns=cols,
                     numeric_measures=tbl_meta.get("numeric_measures", []),
                     text_dimensions=tbl_meta.get("text_dimensions", []),
                     date_fields=[],
                     row_count=tbl_meta.get("row_count", 0),
                     storage_reference=tbl_name,
+                    parent_source_id=source_id,
+                    workspace_id=workspace_id,
+                    original_filename=original_filename,
+                    classification=cls_res,
+                    semantic_schema=sem_schema,
                 ))
 
         fmt_str = data.get("format", "xlsx").lower()

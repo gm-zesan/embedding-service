@@ -104,5 +104,118 @@ class TestExcelDatabaseEngine(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.engine.ingest_excel_file("/tmp/fake.docx", "fake.docx", workspace_id=999)
 
+    def test_custom_source_id_ingestion(self):
+        """Verify custom source_id is preserved and returned in metadata."""
+        file_path = os.path.join(FIXTURES_DIR, "01_single_sheet.xlsx")
+        meta = self.engine.ingest_excel_file(
+            file_path,
+            "01_single_sheet.xlsx",
+            workspace_id=200,
+            source_id="custom_src_abc_123"
+        )
+        self.assertEqual(meta["source_id"], "custom_src_abc_123")
+        self.assertEqual(meta["file_id"], "custom_src_abc_123")
+
+    def test_idempotent_reingestion_with_same_source_id(self):
+        """Verify repeating ingestion with same source_id reuses database path without orphans."""
+        file_path = os.path.join(FIXTURES_DIR, "01_single_sheet.xlsx")
+        meta1 = self.engine.ingest_excel_file(
+            file_path,
+            "01_single_sheet.xlsx",
+            workspace_id=201,
+            source_id="idempotent_src_001"
+        )
+        meta2 = self.engine.ingest_excel_file(
+            file_path,
+            "01_single_sheet.xlsx",
+            workspace_id=201,
+            source_id="idempotent_src_001"
+        )
+        self.assertEqual(meta1["db_path"], meta2["db_path"])
+        self.assertEqual(meta1["source_id"], meta2["source_id"])
+
+    def test_csv_ingestion_with_source_id(self):
+        """Verify CSV ingestion works smoothly with explicit source_id."""
+        import tempfile
+        with tempfile.NamedTemporaryFile("w+", suffix=".csv", delete=False) as tf:
+            tf.write("id,item_name,price\n101,Book,250\n102,Pen,50\n")
+            temp_csv_path = tf.name
+
+        try:
+            meta = self.engine.ingest_excel_file(
+                temp_csv_path,
+                "products.csv",
+                workspace_id=202,
+                source_id="csv_src_999"
+            )
+            self.assertEqual(meta["source_id"], "csv_src_999")
+            self.assertEqual(meta["sheets_count"], 1)
+            self.assertEqual(meta["total_rows"], 2)
+            self.assertIn("sheet1", meta["tables"])
+        finally:
+            if os.path.exists(temp_csv_path):
+                os.unlink(temp_csv_path)
+
+    def test_full_uuid_source_id_preserved(self):
+        """Verify full 36-character UUID source_id is preserved without 32-char truncation."""
+        uuid_str = "c0a80101-1234-5678-9abc-def012345678"
+        file_path = os.path.join(FIXTURES_DIR, "01_single_sheet.xlsx")
+        meta = self.engine.ingest_excel_file(
+            file_path,
+            "01_single_sheet.xlsx",
+            workspace_id=300,
+            source_id=uuid_str
+        )
+        self.assertEqual(meta["source_id"], uuid_str)
+        self.assertEqual(meta["file_id"], uuid_str)
+        self.assertIn(uuid_str, meta["db_path"])
+
+    def test_cross_workspace_deletion_isolated(self):
+        """Security: Verify workspace B cannot delete workspace A's registered source."""
+        uuid_str = "sec-delete-test-uuid-301"
+        file_path = os.path.join(FIXTURES_DIR, "01_single_sheet.xlsx")
+        meta = self.engine.ingest_excel_file(
+            file_path,
+            "01_single_sheet.xlsx",
+            workspace_id=301,
+            source_id=uuid_str
+        )
+        # Attempt to delete from Workspace 302
+        deleted_by_wrong_ws = self.engine.registry.delete_source(workspace_id=302, source_id=uuid_str)
+        self.assertFalse(deleted_by_wrong_ws)
+
+        # Confirm source still exists in Workspace 301
+        source_in_301 = self.engine.registry.get_source(workspace_id=301, source_id=uuid_str)
+        self.assertNotNull(source_in_301) if hasattr(self, 'assertNotNull') else self.assertIsNotNone(source_in_301)
+
+        # Authorized deletion by Workspace 301 succeeds
+        deleted_by_owner = self.engine.registry.delete_source(workspace_id=301, source_id=uuid_str)
+        self.assertTrue(deleted_by_owner)
+
+        # Source is now gone
+        self.assertIsNone(self.engine.registry.get_source(workspace_id=301, source_id=uuid_str))
+
+    def test_csv_utf8_bom_encoding_fallback(self):
+        """Verify CSV with UTF-8 BOM encoding is parsed smoothly."""
+        import tempfile
+        with tempfile.NamedTemporaryFile("wb", suffix=".csv", delete=False) as tf:
+            # UTF-8 BOM prefix
+            content = "\ufeffsku,title,qty\nB01,Widget,10\n".encode("utf-8-sig")
+            tf.write(content)
+            temp_path = tf.name
+
+        try:
+            meta = self.engine.ingest_excel_file(
+                temp_path,
+                "bom_items.csv",
+                workspace_id=303,
+                source_id="bom_src_001"
+            )
+            self.assertEqual(meta["total_rows"], 1)
+            self.assertEqual(meta["sheets_count"], 1)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
 if __name__ == '__main__':
     unittest.main()
