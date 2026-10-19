@@ -190,10 +190,14 @@ class FuzzyEntityResolver:
         # Check in-memory cache for small workspaces
         cache_key = f"{workspace_id}:{field_type}"
         now = time.time()
-        if field_type in ("salesperson", "category"):
+        if field_type in ("salesperson", "category", "customer", "product"):
             cached = self._cache.get(cache_key)
             if cached and (now - cached["timestamp"] < self.cache_ttl):
                 return cached["candidates"]
+            ws_cached = self._cache.get(workspace_id)
+            if ws_cached and isinstance(ws_cached, dict) and "entities" in ws_cached:
+                if field_type in ws_cached["entities"]:
+                    return ws_cached["entities"][field_type]
 
         candidates = self._fetch_candidates_from_db(workspace_id, field_type, search_terms)
 

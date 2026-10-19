@@ -179,8 +179,20 @@ class TestDataSourceArchitecture(unittest.TestCase):
 
     def test_12_read_only_sqlite_sandbox_rejects_mutations(self):
         """SQL generation with mutation statements (INSERT, DROP, DELETE, ATTACH) is strictly blocked."""
-        res_del = self.engine.query_excel(workspace_id=1, file_id=self.src1["file_id"], question="DROP TABLE products")
-        self.assertFalse(res_del["success"] and bool(res_del.get("rows")))
+        from unittest.mock import MagicMock
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"sql": "DROP TABLE products", "explanation": "test mutation"}'
+        mock_client.chat.completions.create.return_value = mock_response
+
+        orig_client = self.engine.client
+        self.engine.client = mock_client
+        try:
+            res_del = self.engine.query_excel(workspace_id=1, file_id=self.src1["file_id"], question="DROP TABLE products")
+            self.assertFalse(res_del["success"] and bool(res_del.get("rows")))
+        finally:
+            self.engine.client = orig_client
 
         # Check table still exists and data is intact
         conn = sqlite3.connect(self.src1["db_path"])

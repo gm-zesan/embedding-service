@@ -147,7 +147,7 @@ class TestPythonIntegrationPipeline(unittest.TestCase):
         """Verify SemanticQueryPlan generates strictly parameterized, read-only SQL with tenant filter."""
         plan = SemanticQueryPlan(
             domain=DomainEnum.SALES,
-            measures=[MeasureSpec(name="total_amount", aggregation=AggregationType.SUM)],
+            measures=[MeasureSpec(name="sales_amount", aggregation=AggregationType.SUM)],
             dimensions=[],
             filters=[],
             confidence=0.95,

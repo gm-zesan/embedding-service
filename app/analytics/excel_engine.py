@@ -11,6 +11,7 @@ import time
 import sqlite3
 import hashlib
 import logging
+from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import pandas as pd
 from openai import OpenAI
@@ -439,12 +440,18 @@ STRICT RULES:
                 "latency_ms": round((time.perf_counter() - t_start) * 1000, 2),
             }
 
-        # ── 6. Execute against Sandboxed SQLite DB ────────────────────
+        # ── 6. Execute against Sandboxed SQLite DB (Read-Only Enforced) ─
         rows = []
         col_names = []
-        conn = sqlite3.connect(db_path)
+        try:
+            db_uri = f"{Path(os.path.abspath(db_path)).as_uri()}?mode=ro"
+            conn = sqlite3.connect(db_uri, uri=True, timeout=5.0)
+        except Exception:
+            conn = sqlite3.connect(db_path, timeout=5.0)
+
         conn.row_factory = sqlite3.Row
         try:
+            conn.execute("PRAGMA query_only = ON;")
             cursor = conn.cursor()
             cursor.execute(sql)
             results = cursor.fetchall()

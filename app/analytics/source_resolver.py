@@ -64,7 +64,7 @@ class DataSourceResolver:
             joined_names = ', '.join(source_names)
             msg = (
                 "ℹ️ **Multi-Source Comparison Notice**\n\n"
-                f"আপনি একাধিক ফাইল (**{joined_names}**) একসাথে তুলনা করার অনুরোধ করেছেন। "
+                f"আপনি একাধিক ফাইল (**{joined_names}**) একসাথে তুলনা বা সমন্বয় করার অনুরোধ করেছেন। "
                 "বর্তমান আর্কিটেকচারে প্রতি টার্নে একটি নির্দিষ্ট ফাইলের অ্যানালিটিক্স প্রসেস করা হয়। "
                 f"অনুগ্রহ করে যেকোনো একটি ফাইল সিলেক্ট করে প্রশ্ন করুন (যেমন: *\"{source_names[0]} এর সেলস কত?\"* অথবা *\"{source_names[1]} এর সেলস কত?\"*)।"
             )
@@ -323,6 +323,9 @@ class DataSourceResolver:
         return any(ref in q_lower for ref in generic_refs)
 
     def _detect_cross_source_comparison(self, query: str, sources: List[DataSource]) -> Optional[List[DataSource]]:
+        if len(sources) < 2:
+            return None
+
         q_lower = query.lower()
         comparison_keywords = ["তুলনা", "compare", "মধ্যে কোন", "which one", "difference", "দুটো", "দুইটার", "both"]
         has_comp_kw = any(kw in q_lower for kw in comparison_keywords)
@@ -340,6 +343,19 @@ class DataSourceResolver:
 
         if len(matched_sources) >= 2 or (has_comp_kw and len(matched_sources) >= 1 and len(seen_filenames) >= 2):
             return matched_sources if len(matched_sources) >= 2 else sources[:2]
+
+        generic_multi_file_markers = [
+            "সব ফাইল", "সবগুলো ফাইল", "সকল ফাইল", "দুটো ফাইল", "দুইটা ফাইল", "উভয় ফাইল", "উভয় ফাইল",
+            "দুটো ফাইলের", "দুইটা ফাইলের", "সব ফাইলের", "সকল ফাইলের", "সবগুলো ফাইলের",
+            "all files", "both files", "multiple files", "across files", "across all files",
+            "across documents", "across all documents", "combine files", "join files"
+        ]
+        if any(m in q_lower for m in generic_multi_file_markers):
+            return sources[:4]
+
+        if has_comp_kw and any(w in q_lower for w in ["files", "ফাইল", "document", "documents"]):
+            return sources[:4]
+
         return None
 
     def _match_source_by_query_mention(self, query: str, sources: List[DataSource]) -> Optional[DataSource]:
@@ -745,7 +761,7 @@ class DataSourceResolver:
         items = [f"{idx+1}. `{s.original_filename}` ({d.dataset_name})" for idx, (_, s, d, _) in enumerate(candidates_with_scores[:4])]
         items_str = "\n".join(items)
         clarification_msg = (
-            f"🤔 **Ambiguous Dataset Context**: একাধিক ফাইলে আপনার প্রশ্নের সাথে সম্পর্কিত ডেটা রয়েছে:\n"
+            f"🤔 **Ambiguous Source Context**: একাধিক ফাইলে আপনার প্রশ্নের সাথে সম্পর্কিত ডেটা রয়েছে:\n"
             f"{items_str}\n\n"
             f"আপনি কোন ডেটাসেটের তথ্য দেখতে চাচ্ছেন অনুগ্রহ করে সিলেক্ট করুন।"
         )

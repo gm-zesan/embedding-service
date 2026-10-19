@@ -217,5 +217,41 @@ class TestExcelDatabaseEngine(unittest.TestCase):
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
 
+    def test_read_only_sqlite_enforcement_and_mode_ro(self):
+        """Security: Verify read-only connection rejects UPDATE/INSERT/DELETE/DROP."""
+        from pathlib import Path
+        file_path = os.path.join(FIXTURES_DIR, "01_single_sheet.xlsx")
+        meta = self.engine.ingest_excel_file(file_path, "01_single_sheet.xlsx", workspace_id=304, source_id="ro_test_01")
+        db_path = meta["db_path"]
+
+        # Open in exact read-only mode used by query_excel
+        db_uri = f"{Path(os.path.abspath(db_path)).as_uri()}?mode=ro"
+        conn = sqlite3.connect(db_uri, uri=True, timeout=5.0)
+        conn.execute("PRAGMA query_only = ON;")
+
+        # SELECT must succeed
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM products")
+        count = cur.fetchone()[0]
+        self.assertGreater(count, 0)
+
+        # UPDATE must fail
+        with self.assertRaises(sqlite3.OperationalError):
+            cur.execute("UPDATE products SET price = 99999")
+
+        # INSERT must fail
+        with self.assertRaises(sqlite3.OperationalError):
+            cur.execute("INSERT INTO products VALUES ('fake', 1, 1, 1)")
+
+        # DELETE must fail
+        with self.assertRaises(sqlite3.OperationalError):
+            cur.execute("DELETE FROM products")
+
+        # DROP TABLE must fail
+        with self.assertRaises(sqlite3.OperationalError):
+            cur.execute("DROP TABLE products")
+
+        conn.close()
+
 if __name__ == '__main__':
     unittest.main()

@@ -100,6 +100,47 @@ class TestSourceSelectionBoundary(unittest.TestCase):
         self.assertGreaterEqual(len(res.candidates), 2)
         self.assertIn("একাধিক ফাইল আপলোড করা রয়েছে", res.clarification_message)
 
+    def test_06_cross_source_comparison_returns_unsupported(self):
+        """Cross-document comparison between named files returns UNSUPPORTED_CROSS_SOURCE with clarification."""
+        res = self.resolver.resolve(
+            query="sales.xlsx এবং sales_october.csv এর মধ্যে তুলনা করো",
+            workspace_id=1,
+        )
+        self.assertEqual(res.status, ResolutionStatus.UNSUPPORTED_CROSS_SOURCE)
+        self.assertGreaterEqual(len(res.candidates), 2)
+        self.assertGreaterEqual(len(res.clarification_options), 2)
+        self.assertIn("একাধিক ফাইল", res.clarification_message)
+
+    def test_07_generic_multi_file_query_returns_unsupported(self):
+        """Generic cross-document aggregation ('সব ফাইল মিলিয়ে') returns UNSUPPORTED_CROSS_SOURCE."""
+        res = self.resolver.resolve(
+            query="সব ফাইল মিলিয়ে মোট সেলস কত?",
+            workspace_id=1,
+        )
+        self.assertEqual(res.status, ResolutionStatus.UNSUPPORTED_CROSS_SOURCE)
+        self.assertGreaterEqual(len(res.candidates), 2)
+        self.assertGreaterEqual(len(res.clarification_options), 2)
+
+    def test_08_explicit_source_id_isolation_and_not_found(self):
+        """Strict isolation: explicit source_id not in workspace returns NOT_FOUND without fallback."""
+        # Non-existent ID in workspace 1
+        res = self.resolver.resolve(
+            query="What is the revenue?",
+            workspace_id=1,
+            explicit_source_id="invalid-uuid-9999",
+        )
+        self.assertEqual(res.status, ResolutionStatus.NOT_FOUND)
+        self.assertIsNone(res.source)
+
+        # Cross-workspace probe: valid workspace 1 file_id probed from workspace 999
+        res_cross = self.resolver.resolve(
+            query="What is the revenue?",
+            workspace_id=999,
+            explicit_source_id=self.src_sales["file_id"],
+        )
+        self.assertEqual(res_cross.status, ResolutionStatus.NOT_FOUND)
+        self.assertIsNone(res_cross.source)
+
 
 if __name__ == "__main__":
     unittest.main()
