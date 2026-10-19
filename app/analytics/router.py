@@ -71,6 +71,24 @@ class ExcelQueryRequest(BaseModel):
     history: Optional[List[Dict[str, str]]] = Field(default=None, description="Recent conversation turns")
 
 
+class SourceResolveRequest(BaseModel):
+    query: str = Field(..., description="User question or query text")
+    workspace_id: int = Field(..., description="Tenant workspace ID")
+    explicit_source_id: Optional[str] = Field(default=None, description="Optional explicit source ID")
+
+
+class SourceResolveResponse(BaseModel):
+    success: bool
+    status: str  # "resolved", "ambiguous", "not_found", "unsupported"
+    source_id: Optional[str] = None
+    filename: Optional[str] = None
+    confidence: float = 0.0
+    reason: str = ""
+    clarification_message: Optional[str] = None
+    clarification_options: Optional[List[str]] = None
+    candidates: Optional[List[Dict[str, Any]]] = None
+
+
 @router.get("/schema")
 def get_discovered_schema():
     """Returns dynamic schema discovery and auto-cataloged metadata."""
@@ -91,6 +109,172 @@ def list_workspace_sources(workspace_id: int):
     }
 
 
+@router.post("/sources/resolve", response_model=SourceResolveResponse)
+def resolve_analytical_source(req: SourceResolveRequest):
+    """
+    Resolves the most relevant generic analytics data source for a user query.
+    1. If explicit_source_id is given, validates it against workspace ownership.
+    2. If single source in workspace, auto-resolves with 100% confidence.
+    3. Searches Typesense analytics_catalog collection with strict workspace filter.
+    4. Evaluates confidence & ambiguity policy (single clear winner vs multiple close candidates).
+    5. Falls back to schema-fingerprint and column matching in source_resolver if Typesense has no hits.
+    """
+    workspace_id = req.workspace_id
+    query = req.query.strip()
+    explicit_id = req.explicit_source_id
+
+    # 1. Manual source selection override
+    if explicit_id:
+        src = source_registry.get_source(workspace_id, explicit_id)
+        if src:
+            return SourceResolveResponse(
+                success=True,
+                status="resolved",
+                source_id=src.source_id,
+                filename=src.original_filename,
+                confidence=1.0,
+                reason=f"Explicit source override: {src.original_filename}",
+            )
+        return SourceResolveResponse(
+            success=False,
+            status="not_found",
+            reason=f"Explicit source {explicit_id} not found in workspace {workspace_id}",
+            clarification_message="নির্দিষ্ট করা ফাইলটি পাওয়া যায়নি বা এই ওয়ার্কস্পেসের আওতাভুক্ত নয়।",
+        )
+
+    # 2. Check all sources in workspace
+    all_sources = source_registry.list_sources(workspace_id)
+    if not all_sources:
+        return SourceResolveResponse(
+            success=False,
+            status="not_found",
+            reason="No generic analytics documents found in workspace.",
+            clarification_message="এই ওয়ার্কস্পেসে কোনো স্প্রেডশিট ডেটাসেট পাওয়া যায়নি।",
+        )
+
+    if len(all_sources) == 1:
+        single_src = all_sources[0]
+        return SourceResolveResponse(
+            success=True,
+            status="resolved",
+            source_id=single_src.source_id,
+            filename=single_src.original_filename,
+            confidence=1.0,
+            reason=f"Single active source in workspace: {single_src.original_filename}",
+        )
+
+    # 3. Search Typesense analytics_catalog
+    candidates = []
+    try:
+        from app.typesense_engine import get_typesense_client, search_analytics_metadata
+        ts_client = get_typesense_client()
+        hits = search_analytics_metadata(ts_client, query, workspace_id, top_k=5)
+        for h in hits:
+            doc = h.get("document", {})
+            score = h.get("text_match", 0)
+            src_id = doc.get("source_id")
+            fn = doc.get("original_filename")
+            if src_id and source_registry.get_source(workspace_id, src_id):
+                candidates.append({
+                    "source_id": src_id,
+                    "filename": fn,
+                    "score": score,
+                    "summary": doc.get("dataset_summary"),
+                })
+    except Exception as e:
+        logger.warning(f"Typesense analytics search failed, falling back to local resolver: {e}")
+
+    # Minimum BM25 text match score required to avoid noise/stopword false positives (not a probability)
+    MIN_TEXT_MATCH_SCORE = 15
+    # Threshold margin: top score must be >= 1.20x of the second score to declare a clear winner
+    AMBIGUITY_SCORE_MARGIN = 1.20
+
+    # Filter out weak/negligible matches (e.g. score < 15 or 0)
+    valid_candidates = [c for c in candidates if c.get("score", 0) >= MIN_TEXT_MATCH_SCORE]
+
+    # Evaluate Typesense hits if available
+    if valid_candidates:
+        top_cand = valid_candidates[0]
+        top_score = top_cand.get("score", 0)
+
+        # Ambiguity Policy:
+        # If there's only 1 valid candidate above minimum threshold
+        if len(valid_candidates) == 1:
+            return SourceResolveResponse(
+                success=True,
+                status="resolved",
+                source_id=top_cand["source_id"],
+                filename=top_cand["filename"],
+                confidence=0.9,
+                reason=f"Resolved via Typesense analytics catalog: {top_cand['filename']} (BM25 score: {top_score})",
+                candidates=valid_candidates,
+            )
+        else:
+            second_cand = valid_candidates[1]
+            second_score = second_cand.get("score", 0)
+
+            # Safe comparison / zero-score handling:
+            # Check if top score beats runner-up by at least AMBIGUITY_SCORE_MARGIN (1.20x)
+            is_clear_winner = False
+            if second_score == 0 and top_score >= MIN_TEXT_MATCH_SCORE:
+                is_clear_winner = True
+            elif second_score > 0 and (top_score >= AMBIGUITY_SCORE_MARGIN * second_score):
+                is_clear_winner = True
+
+            if is_clear_winner:
+                return SourceResolveResponse(
+                    success=True,
+                    status="resolved",
+                    source_id=top_cand["source_id"],
+                    filename=top_cand["filename"],
+                    confidence=0.9,
+                    reason=f"Resolved via Typesense analytics catalog: {top_cand['filename']} (BM25 score: {top_score} vs {second_score})",
+                    candidates=valid_candidates,
+                )
+            else:
+                # Ambiguous: multiple close candidates within the 1.20x margin or tied
+                options = [f"{c['filename']} থেকে উত্তর দাও" for c in valid_candidates[:3]]
+                items_str = "\n".join([f"{idx+1}. `{c['filename']}`" for idx, c in enumerate(valid_candidates[:3])])
+                return SourceResolveResponse(
+                    success=False,
+                    status="ambiguous",
+                    confidence=0.5,
+                    reason=f"Multiple datasets match the query with close BM25 scores ({top_score} vs {second_score}). User clarification required.",
+                    clarification_message=f"🤔 **একাধিক ফাইল পাওয়া গেছে**:\n{items_str}\n\nঅনুগ্রহ করে কোন ফাইলটি দেখতে চান সিলেক্ট করুন।",
+                    clarification_options=options,
+                    candidates=valid_candidates,
+                )
+
+    # 4. Fallback: Local schema and column matching via source_resolver
+    resolver_res = source_resolver.resolve(query=query, workspace_id=workspace_id)
+    if resolver_res.status == ResolutionStatus.RESOLVED and resolver_res.source_id:
+        src = source_registry.get_source(workspace_id, resolver_res.source_id)
+        return SourceResolveResponse(
+            success=True,
+            status="resolved",
+            source_id=resolver_res.source_id,
+            filename=src.original_filename if src else resolver_res.source_id,
+            confidence=0.85,
+            reason=resolver_res.reason or "Resolved via schema and column match",
+        )
+    elif resolver_res.status == ResolutionStatus.AMBIGUOUS:
+        return SourceResolveResponse(
+            success=False,
+            status="ambiguous",
+            reason=resolver_res.reason,
+            clarification_message=resolver_res.clarification_message,
+            clarification_options=resolver_res.clarification_options,
+            candidates=resolver_res.candidates,
+        )
+
+    return SourceResolveResponse(
+        success=False,
+        status="not_found",
+        reason="No matching generic analytics dataset found for query.",
+        clarification_message="আপনার প্রশ্নের সাথে সম্পর্কিত কোনো স্প্রেডশিট বা টেবিল পাওয়া যায়নি।",
+    )
+
+
 @router.delete("/sources/{source_id}")
 def delete_workspace_source(source_id: str, workspace_id: int):
     """Deletes an analytical data source and its storage files with workspace authorization."""
@@ -100,6 +284,14 @@ def delete_workspace_source(source_id: str, workspace_id: int):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Source {source_id} not found in workspace {workspace_id}",
         )
+    # Also remove from Typesense analytics catalog
+    try:
+        from app.typesense_engine import get_typesense_client, delete_analytics_metadata_by_source
+        ts_client = get_typesense_client()
+        delete_analytics_metadata_by_source(ts_client, workspace_id=workspace_id, source_id=source_id)
+    except Exception as e:
+        logger.warning(f"Error removing source {source_id} from Typesense analytics catalog: {e}")
+
     return {"success": True, "message": f"Source {source_id} deleted successfully."}
 
 

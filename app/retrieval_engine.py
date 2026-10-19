@@ -4,9 +4,11 @@ import time
 # pyrefly: ignore [missing-import]
 import httpx
 from typing import Any, Dict, List, Optional
-from app import config
-from app.embedding import embed
-from app.llm import LLMRequest, default_client as llm_client
+from fastapi import HTTPException
+try:
+    from app.embedding import embed
+except Exception:
+    embed = None
 from app.typesense_engine import execute_hybrid_search, get_typesense_client
 
 logger = logging.getLogger("retrieval_engine")
@@ -159,6 +161,14 @@ async def search_knowledge_base(
     tier_executed = "tier1_raw_fastpath"
     expansion_applied = False
     expanded_query = None
+
+    # ── Embedding availability guard ───────────────────────────────────────────
+    if embed is None or not callable(embed):
+        logger.warning("Dense embedding engine unavailable for query [%s]. Raising HTTP 503.", query)
+        raise HTTPException(
+            status_code=503,
+            detail="Embedding engine is unavailable for dense vector search (service degraded).",
+        )
 
     # ── Tier 1: Fast-Path Raw Dense Hybrid Search ──────────────────────────────
     t1_start = time.time()

@@ -3,6 +3,8 @@ import time
 import uuid
 from typing import Optional, Dict, Any
 
+logger = logging.getLogger(__name__)
+
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
@@ -13,15 +15,21 @@ from fastapi.middleware.cors import CORSMiddleware
 # pyrefly: ignore [missing-import]
 from fastapi.responses import JSONResponse
 
-from app.embedding import (
-    embed,
-    embed_batch,
-    load_model,
-    warmup_model,
-    unload_model,
-    get_model,
-    get_embedding_dimension,
-)
+try:
+    from app.embedding import (
+        embed,
+        embed_batch,
+        load_model,
+        warmup_model,
+        unload_model,
+        get_model,
+        get_embedding_dimension,
+    )
+    EMBEDDING_AVAILABLE = True
+except Exception as e:
+    logger.warning("Embedding module unavailable (will serve analytics): %s", e)
+    EMBEDDING_AVAILABLE = False
+    embed = embed_batch = load_model = warmup_model = unload_model = get_model = get_embedding_dimension = None
 from app.models import (
     EmbedRequest,
     BatchEmbedRequest,
@@ -108,8 +116,9 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Embedding & Retrieval Service | APP_ENV=%s", APP_ENV)
 
     try:
-        load_model()
-        warmup_model()
+        if EMBEDDING_AVAILABLE and load_model:
+            load_model()
+            warmup_model()
         # Initialize Typesense FAQ collection schema
         ts_client = get_typesense_client()
         ensure_faq_collection(ts_client)
@@ -117,7 +126,8 @@ async def lifespan(app: FastAPI):
         logger.exception("Failed during startup initialization")
     yield
     logger.info("Shutting down Embedding Service")
-    unload_model()
+    if EMBEDDING_AVAILABLE and unload_model:
+        unload_model()
 
 
 app = FastAPI(
@@ -212,7 +222,22 @@ async def general_exception_handler(request: Request, exc: Exception):
 @app.get("/api/v1/health", tags=["Monitoring"])
 def health():
     """Health check with model metadata, Typesense status, and uptime."""
-    model = get_model()
+    model = None
+    if EMBEDDING_AVAILABLE and callable(get_model):
+        try:
+            model = get_model()
+        except Exception as e:
+            logger.warning("Error calling get_model(): %s", e)
+            model = None
+
+    dim = 768
+    if EMBEDDING_AVAILABLE and callable(get_embedding_dimension):
+        try:
+            dim = get_embedding_dimension()
+        except Exception as e:
+            logger.warning("Error calling get_embedding_dimension(): %s", e)
+            dim = 768
+
     ts_ok = False
     try:
         ts_res = get_typesense_client().operations.is_healthy()
@@ -220,11 +245,15 @@ def health():
     except Exception:
         pass
 
+    embedding_ready = bool(EMBEDDING_AVAILABLE and callable(embed) and model is not None)
+    status_str = "ok" if (embedding_ready and ts_ok) else "degraded"
+
     return {
-        "status": "ok",
+        "status": status_str,
+        "embedding_available": embedding_ready,
         "model_loaded": model is not None,
         "model_name": MODEL_NAME if model is not None else None,
-        "embedding_dimension": get_embedding_dimension(),
+        "embedding_dimension": dim,
         "typesense_healthy": ts_ok,
         "device": str(model.device) if model is not None else None,
         "uptime_seconds": round(time.time() - _start_time, 2),
@@ -266,6 +295,12 @@ def sync_faq(request: SyncFAQRequest):
     """
     Generate embedding for FAQ question+answer and upsert document into Typesense.
     """
+    if not EMBEDDING_AVAILABLE or not callable(embed):
+        raise HTTPException(
+            status_code=503,
+            detail="Embedding service is unavailable in this environment (embeddings degraded/disabled).",
+        )
+
     combined_text = f"{request.question.strip()} {request.answer.strip()}"
     vector = embed(combined_text)
 
@@ -320,6 +355,12 @@ def delete_faq(faq_id: str):
 )
 def embedding(request: EmbedRequest, req: Request):
     """Generate an embedding vector for a single text input."""
+    if not EMBEDDING_AVAILABLE or not callable(embed):
+        raise HTTPException(
+            status_code=503,
+            detail="Embedding service is unavailable in this environment (embeddings degraded/disabled).",
+        )
+
     start = time.time()
     vector = embed(request.text)
     elapsed = time.time() - start
@@ -341,6 +382,12 @@ def embedding(request: EmbedRequest, req: Request):
 )
 def embedding_batch(request: BatchEmbedRequest, req: Request):
     """Generate embedding vectors for a batch of text inputs."""
+    if not EMBEDDING_AVAILABLE or not callable(embed_batch):
+        raise HTTPException(
+            status_code=503,
+            detail="Embedding service is unavailable in this environment (embeddings degraded/disabled).",
+        )
+
     batch_size = len(request.texts)
     start = time.time()
     vectors = embed_batch(request.texts)

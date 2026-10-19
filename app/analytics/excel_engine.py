@@ -262,6 +262,18 @@ class ExcelDatabaseEngine:
         # Register in workspace-scoped registry
         self.registry.register_source(source)
 
+        # Generate rich searchable metadata and index into Typesense analytics catalog
+        from .metadata_generator import metadata_generator
+        from app.typesense_engine import get_typesense_client, upsert_analytics_metadata
+
+        meta = metadata_generator.generate_metadata(source, document_id=source_id, use_llm=True)
+        try:
+            ts_client = get_typesense_client()
+            upsert_analytics_metadata(ts_client, meta.model_dump())
+            logger.info("Successfully indexed analytics metadata for source %s into Typesense", file_hash)
+        except Exception as ts_err:
+            logger.warning("Typesense analytics metadata indexing warning (non-fatal): %s", ts_err)
+
         msg = (
             f"Successfully ingested '{original_filename}' with {len(datasets)} sheets and {total_rows} rows."
             if not failed_sheets
@@ -281,6 +293,7 @@ class ExcelDatabaseEngine:
             "total_rows": total_rows,
             "schema_summary": schema_summary,
             "db_path": db_path,
+            "metadata_catalog": meta.model_dump(),
         }
 
     def get_file_metadata(self, workspace_id: int, file_id: str) -> Optional[Dict[str, Any]]:

@@ -101,3 +101,86 @@ def execute_hybrid_search(
         return response['results'][0]
     return {'hits': []}
 
+
+def ensure_analytics_collection(client: typesense.Client) -> None:
+    """Ensure the dedicated Typesense collection for generic analytics datasets metadata exists."""
+    schema = {
+        'name': config.TYPESENSE_ANALYTICS_COLLECTION,
+        'fields': [
+            {'name': 'id', 'type': 'string'},
+            {'name': 'workspace_id', 'type': 'int32', 'facet': True},
+            {'name': 'source_id', 'type': 'string', 'facet': True},
+            {'name': 'document_id', 'type': 'string', 'optional': True, 'facet': True},
+            {'name': 'ingestion_purpose', 'type': 'string', 'facet': True},
+            {'name': 'lifecycle_status', 'type': 'string', 'facet': True},
+            {'name': 'metadata_version', 'type': 'int32'},
+            {'name': 'original_filename', 'type': 'string'},
+            {'name': 'dataset_summary', 'type': 'string'},
+            {'name': 'sheet_names', 'type': 'string[]', 'optional': True},
+            {'name': 'columns_summary', 'type': 'string'},
+            {'name': 'searchable_keywords', 'type': 'string[]', 'optional': True},
+            {'name': 'created_at', 'type': 'string', 'optional': True},
+        ],
+        'default_sorting_field': 'metadata_version',
+    }
+    try:
+        client.collections[config.TYPESENSE_ANALYTICS_COLLECTION].retrieve()
+        logger.info("Typesense collection '%s' already exists.", config.TYPESENSE_ANALYTICS_COLLECTION)
+    except typesense.exceptions.ObjectNotFound:
+        logger.info("Creating Typesense collection '%s'...", config.TYPESENSE_ANALYTICS_COLLECTION)
+        client.collections.create(schema)
+        logger.info("Collection '%s' created successfully.", config.TYPESENSE_ANALYTICS_COLLECTION)
+    except Exception as e:
+        logger.warning("Typesense analytics collection check warning: %s", e)
+
+
+def upsert_analytics_metadata(client: typesense.Client, document: Dict[str, Any]) -> Dict[str, Any]:
+    """Upsert analytical dataset metadata into Typesense."""
+    ensure_analytics_collection(client)
+    return client.collections[config.TYPESENSE_ANALYTICS_COLLECTION].documents.upsert(document)
+
+
+def delete_analytics_metadata(client: typesense.Client, doc_id: str) -> Dict[str, Any]:
+    """Delete an analytics metadata document from Typesense."""
+    try:
+        return client.collections[config.TYPESENSE_ANALYTICS_COLLECTION].documents[str(doc_id)].delete()
+    except typesense.exceptions.ObjectNotFound:
+        return {'id': str(doc_id), 'deleted': False}
+    except Exception as e:
+        logger.warning(f"Failed to delete analytics metadata {doc_id}: {e}")
+        return {'id': str(doc_id), 'deleted': False, 'error': str(e)}
+
+
+def delete_analytics_metadata_by_source(client: typesense.Client, workspace_id: int, source_id: str) -> bool:
+    """Delete analytics metadata matching workspace_id and source_id."""
+    try:
+        filter_str = f"workspace_id:={workspace_id} && source_id:={source_id}"
+        client.collections[config.TYPESENSE_ANALYTICS_COLLECTION].documents.delete({'filter_by': filter_str})
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to delete analytics metadata for source {source_id} in ws {workspace_id}: {e}")
+        return False
+
+
+def search_analytics_metadata(
+    client: typesense.Client,
+    query_text: str,
+    workspace_id: int,
+    top_k: int = 5,
+) -> List[Dict[str, Any]]:
+    """Search analytics metadata collection scoped strictly to workspace and active generic analytics."""
+    try:
+        ensure_analytics_collection(client)
+        search_query = {
+            'q': query_text if query_text.strip() else '*',
+            'query_by': 'dataset_summary,columns_summary,sheet_names,searchable_keywords,original_filename',
+            'query_by_weights': '4,4,3,3,2',
+            'filter_by': f'workspace_id:={workspace_id} && lifecycle_status:=active && ingestion_purpose:=[data_analytics, generic_analytics]',
+            'per_page': top_k,
+        }
+        res = client.collections[config.TYPESENSE_ANALYTICS_COLLECTION].documents.search(search_query)
+        return res.get('hits', [])
+    except Exception as e:
+        logger.warning(f"Typesense search_analytics_metadata error: {e}")
+        return []
+
