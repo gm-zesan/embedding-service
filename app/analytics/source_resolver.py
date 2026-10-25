@@ -54,7 +54,7 @@ class DataSourceResolver:
             return SourceResolutionResult(
                 status=ResolutionStatus.NOT_FOUND,
                 reason="No uploaded documents or datasets found in workspace.",
-                clarification_message="⚠️ **No Data Sources Found**: এই ওয়ার্কস্পেসে কোনো আপলোড করা ফাইল বা ডেটাসেট পাওয়া যায়নি। অনুগ্রহ করে প্রথমে একটি ফাইল (XLSX, CSV, PDF) আপলোড করুন।"
+                clarification_message="⚠️ **No Data Sources Found**: এই ওয়ার্কস্পেসে কোনো আপলোড করা ফাইল বা ডেটাসেট পাওয়া যায়নি। অনুগ্রহ করে প্রথমে একটি ফাইল (XLSX, CSV) আপলোড করুন।"
             )
 
         # Step 0: Cross-Source Comparison Detection

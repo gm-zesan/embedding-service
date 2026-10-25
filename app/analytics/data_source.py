@@ -1,6 +1,6 @@
 """
 Generic Document & Data Source Analytics Abstractions.
-Supports multi-file, multi-format (XLSX, CSV, PDF) dataset modeling and resolution.
+Supports multi-file, multi-format (XLSX, CSV) dataset modeling and resolution.
 """
 
 import os
@@ -15,7 +15,6 @@ class DataSourceFormat(str, Enum):
     XLSX = "xlsx"
     XLS = "xls"
     CSV = "csv"
-    PDF = "pdf"
 
 
 class DatasetCategory(str, Enum):
@@ -44,7 +43,7 @@ class DatasetClassification(BaseModel):
 class Dataset(BaseModel):
     """
     Represents an individual tabular dataset inside a data source
-    (e.g., a sheet in an Excel file, a standalone CSV table, or an extracted table from a PDF).
+    (e.g., a sheet in an Excel file or a standalone CSV table).
     """
     dataset_id: str
     dataset_name: str

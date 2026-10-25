@@ -212,7 +212,7 @@ class DataSourceRegistry:
                 ))
 
         fmt_str = data.get("format", "xlsx").lower()
-        if fmt_str not in ("xlsx", "xls", "csv", "pdf"):
+        if fmt_str not in ("xlsx", "xls", "csv"):
             fmt_str = "xlsx"
 
         return DataSource(
