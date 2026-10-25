@@ -83,6 +83,7 @@ class DataSource(BaseModel):
     schema_summary: str = ""
     total_rows: int = 0
     db_path: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 @dataclass

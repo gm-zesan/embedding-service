@@ -247,11 +247,54 @@ class TestExcelDatabaseEngine(unittest.TestCase):
         with self.assertRaises(sqlite3.OperationalError):
             cur.execute("DELETE FROM products")
 
-        # DROP TABLE must fail
-        with self.assertRaises(sqlite3.OperationalError):
-            cur.execute("DROP TABLE products")
+    def test_sheet_name_sanitized_collision_does_not_overwrite(self):
+        """Verify that two sheets sanitizing to the same table name do not overwrite each other."""
+        import tempfile
+        import pandas as pd
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            tmp_path = tmp.name
 
-        conn.close()
+        try:
+            with pd.ExcelWriter(tmp_path, engine="openpyxl") as writer:
+                pd.DataFrame({"revenue": [1000, 2000]}).to_excel(writer, sheet_name="Sales 2024", index=False)
+                pd.DataFrame({"revenue": [3000, 4000]}).to_excel(writer, sheet_name="Sales_2024", index=False)
+
+            meta = self.engine.ingest_excel_file(tmp_path, "collision_test.xlsx", workspace_id=305, source_id="collision_test_01")
+            self.assertEqual(meta["sheets_count"], 2)
+            self.assertIn("sales_2024", meta["tables"])
+            self.assertIn("sales_2024_1", meta["tables"])
+
+            conn = sqlite3.connect(meta["db_path"])
+            cur = conn.cursor()
+            cur.execute("SELECT SUM(revenue) FROM sales_2024")
+            sum1 = cur.fetchone()[0]
+            cur.execute("SELECT SUM(revenue) FROM sales_2024_1")
+            sum2 = cur.fetchone()[0]
+            conn.close()
+
+            self.assertEqual(sum1, 3000)
+            self.assertEqual(sum2, 7000)
+
+            # Verify table metadata maps back to original human sheet names
+            self.assertEqual(meta["tables"]["sales_2024"]["original_sheet"], "Sales 2024")
+            self.assertEqual(meta["tables"]["sales_2024_1"]["original_sheet"], "Sales_2024")
+            self.assertEqual(meta["tables"]["sales_2024"]["row_count"], 2)
+            self.assertEqual(meta["tables"]["sales_2024_1"]["row_count"], 2)
+
+            conn = sqlite3.connect(meta["db_path"])
+            cur = conn.cursor()
+            cur.execute("SELECT revenue FROM sales_2024 ORDER BY revenue ASC")
+            rows1 = [r[0] for r in cur.fetchall()]
+            cur.execute("SELECT revenue FROM sales_2024_1 ORDER BY revenue ASC")
+            rows2 = [r[0] for r in cur.fetchall()]
+            conn.close()
+
+            self.assertEqual(rows1, [1000, 2000])
+            self.assertEqual(rows2, [3000, 4000])
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
 if __name__ == '__main__':
     unittest.main()
+

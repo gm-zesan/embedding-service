@@ -43,6 +43,7 @@ class AnalyticsQueryRequest(BaseModel):
     engine: Literal["semantic", "excel", "data_source"] = Field("semantic", description="Engine to use")
     file_id: Optional[str] = Field(default=None, description="Optional uploaded data source or file ID")
     history: Optional[List[Dict[str, str]]] = Field(default=None, description="Recent conversation turns")
+    currency_hint: Optional[str] = Field(default=None, description="Optional explicit currency hint (e.g. USD, EUR, BDT)")
 
 
 class AnalyticsQueryResponse(BaseModel):
@@ -69,6 +70,7 @@ class ExcelQueryRequest(BaseModel):
     question: str = Field(..., description="Natural language question about the uploaded source")
     file_id: Optional[str] = Field(default=None, description="Optional source/file ID")
     history: Optional[List[Dict[str, str]]] = Field(default=None, description="Recent conversation turns")
+    currency_hint: Optional[str] = Field(default=None, description="Optional explicit currency hint (e.g. USD, EUR, BDT)")
 
 
 class SourceResolveRequest(BaseModel):
@@ -358,6 +360,7 @@ async def query_analytical_source(req: ExcelQueryRequest):
             file_id=req.file_id,
             question=req.question,
             history=req.history,
+            currency_hint=req.currency_hint,
         )
         return result
     except Exception as e:
@@ -389,6 +392,7 @@ async def query_analytics(req: AnalyticsQueryRequest):
             file_id=req.file_id,
             question=query,
             history=req.history,
+            currency_hint=req.currency_hint,
         )
         return AnalyticsQueryResponse(
             success=doc_res.get("success", False),
@@ -554,7 +558,7 @@ async def query_analytics(req: AnalyticsQueryRequest):
         sql, params = compiler.compile(plan, workspace_id=workspace_id)
         rows, exec_latency = executor.execute(sql, params)
         total_latency = round(llm_latency + exec_latency, 2)
-        report = formatter.format(query, plan, rows, latency_ms=total_latency)
+        report = formatter.format(query, plan, rows, latency_ms=total_latency, currency_hint=req.currency_hint)
 
         intent_label = f"{plan.domain.value}_query"
         if plan.measures:

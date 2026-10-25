@@ -3,10 +3,29 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
+from unittest.mock import patch
+
+
 class TestDegradedEmbeddingFallback(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.client = TestClient(app)
+
+    def setUp(self):
+        self.patcher1 = patch("app.main.EMBEDDING_AVAILABLE", False)
+        self.patcher2 = patch("app.main.embed", None)
+        self.patcher3 = patch("app.main.get_model", lambda: None)
+        self.patcher4 = patch("app.retrieval_engine.embed", None)
+        self.patcher1.start()
+        self.patcher2.start()
+        self.patcher3.start()
+        self.patcher4.start()
+
+    def tearDown(self):
+        self.patcher1.stop()
+        self.patcher2.stop()
+        self.patcher3.stop()
+        self.patcher4.stop()
 
     def test_health_check_returns_degraded_without_crashing(self):
         """Health check must gracefully return degraded status when embedding engine is unavailable."""

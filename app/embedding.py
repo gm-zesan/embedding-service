@@ -18,12 +18,24 @@ _embedding_dimension: int = 0
 
 
 def get_model() -> SentenceTransformer | None:
-    """Return the loaded model instance, or *None* if not yet loaded."""
+    """Return the loaded model instance, or lazily load if available."""
+    global _model
+    if _model is None:
+        try:
+            return load_model()
+        except Exception:
+            return None
     return _model
 
 
 def get_embedding_dimension() -> int:
     """Return the cached embedding dimension (avoids querying the model at runtime)."""
+    global _embedding_dimension
+    if _embedding_dimension == 0:
+        model = get_model()
+        if model is not None and _embedding_dimension > 0:
+            return _embedding_dimension
+        return 768
     return _embedding_dimension
 
 

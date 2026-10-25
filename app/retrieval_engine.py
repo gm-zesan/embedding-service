@@ -9,6 +9,8 @@ try:
     from app.embedding import embed
 except Exception:
     embed = None
+from app import config
+from app.llm import LLMRequest, default_client as llm_client
 from app.typesense_engine import execute_hybrid_search, get_typesense_client
 
 logger = logging.getLogger("retrieval_engine")
@@ -162,6 +164,14 @@ async def search_knowledge_base(
     expansion_applied = False
     expanded_query = None
 
+    # ── Tenant Isolation Guard ────────────────────────────────────────────────
+    if workspace_id is None:
+        logger.warning("Search query [%s] called without workspace_id. Raising HTTP 400 for tenant safety.", query)
+        raise HTTPException(
+            status_code=400,
+            detail="workspace_id is required to ensure multi-tenant data isolation.",
+        )
+
     # ── Embedding availability guard ───────────────────────────────────────────
     if embed is None or not callable(embed):
         logger.warning("Dense embedding engine unavailable for query [%s]. Raising HTTP 503.", query)
@@ -194,10 +204,18 @@ async def search_knowledge_base(
     current_hits = first_pass_hits
 
     # ── Tier 2 Fallback: Controlled LLM Query Expansion ───────────────────────
-    # Triggered dynamically when the raw MPNet vector score is low/unconfident (< RETRIEVAL_EXPANSION_THRESHOLD)
+    # Gating: Only invoke LLM expansion when Tier 1 did NOT achieve a confident match.
+    # If Tier 1 found an exact/strong keyword match (ratio >= 0.80) or score >= 0.60,
+    # expansion is skipped to eliminate ~1000ms latency and avoid dragging in trailing noise.
     t_llm_expand_ms = 0.0
-    expansion_threshold = config.RETRIEVAL_EXPANSION_THRESHOLD  # default 0.55 - 0.65
-    if first_pass_top_score < expansion_threshold and config.LLM_EXPANSION_API_KEY:
+    expansion_threshold = config.RETRIEVAL_EXPANSION_THRESHOLD  # default 0.65
+    top_hit_confident = bool(
+        first_pass_hits and (
+            first_pass_top_score >= 0.60 or
+            (first_pass_hits[0].get("keyword_score", 0.0) >= 0.80 and first_pass_hits[0].get("match_type") == "hybrid")
+        )
+    )
+    if not top_hit_confident and first_pass_top_score < expansion_threshold and config.LLM_EXPANSION_API_KEY:
         t_llm_start = time.time()
         llm_expanded = await expand_query_via_llm(clean_query)
         if llm_expanded:
@@ -224,7 +242,20 @@ async def search_knowledge_base(
             current_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)[:candidate_pool]
         t_llm_expand_ms = round((time.time() - t_llm_start) * 1000, 2)
 
-    final_hits = current_hits[:top_k]
+    # ── Precision Candidate Filtering ─────────────────────────────────────────
+    # Filter out low-confidence trailing noise that lacks relevance to the primary query
+    filtered_hits = []
+    top_score = current_hits[0]["score"] if current_hits else 0.0
+    for i, h in enumerate(current_hits):
+        if h["score"] < 0.40:
+            continue
+        # If top hit is highly confident (>= 0.60), trailing hits with zero keyword match
+        # that drop more than 25% below top score are pruned as unrelated noise.
+        if i > 0 and top_score >= 0.60 and h.get("keyword_score", 0.0) == 0.0 and h["score"] < (top_score * 0.75):
+            continue
+        filtered_hits.append(h)
+
+    final_hits = (filtered_hits if filtered_hits else current_hits)[:top_k]
     total_retrieval_latency_ms = round((time.time() - t_total_start) * 1000, 2)
     final_score = final_hits[0]["score"] if final_hits else 0.0
     returned_faq_ids = [h["id"] for h in final_hits]

@@ -227,6 +227,7 @@ class DataSourceRegistry:
             schema_summary=data.get("schema_summary", ""),
             total_rows=data.get("total_rows", 0),
             db_path=data.get("db_path"),
+            metadata=data.get("metadata", {}),
         )
 
 

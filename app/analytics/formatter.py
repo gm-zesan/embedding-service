@@ -3,7 +3,7 @@ Analytics Report Formatter.
 Translates structured query results and plan metadata into clean, screenshot-ready Markdown reports.
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from app.analytics.models import SemanticQueryPlan
 
 
@@ -12,16 +12,19 @@ class AnalyticsFormatter:
     Formats analytical results into professional, human-readable reports and Markdown tables.
     """
 
-    @staticmethod
-    def format_currency(amount: float) -> str:
-        return f"৳{amount:,.2f}"
-
     @classmethod
     def is_monetary_field(cls, key: str) -> bool:
-        lower = key.lower()
-        if any(non_money in lower for non_money in ["count", "quantity", "qty", "phone", "code", "id", "status"]):
-            return False
-        return any(money in lower for money in ["amount", "sales", "revenue", "due", "collected", "collection", "price", "target", "cost", "total_value"])
+        from .excel_engine import ExcelDatabaseEngine
+        return ExcelDatabaseEngine._is_monetary_column(key)
+
+    @classmethod
+    def get_currency_symbol(cls, key: str, default: str = "৳", currency_hint: Optional[str] = None) -> str:
+        from .excel_engine import ExcelDatabaseEngine
+        return ExcelDatabaseEngine._get_currency_symbol(key, default, currency_hint)
+
+    @classmethod
+    def format_currency(cls, amount: float, symbol: str = "৳") -> str:
+        return f"{symbol}{amount:,.2f}" if amount >= 0 else f"-{symbol}{abs(amount):,.2f}"
 
     def format(
         self,
@@ -29,6 +32,7 @@ class AnalyticsFormatter:
         plan: SemanticQueryPlan,
         results: List[Dict[str, Any]],
         latency_ms: float = 0.0,
+        currency_hint: Optional[str] = None,
     ) -> str:
         # 1. Security Rejection Notice
         if plan.is_security_rejection:
@@ -65,7 +69,8 @@ class AnalyticsFormatter:
             for k, v in first_row.items():
                 label = k.replace("_", " ").title()
                 if isinstance(v, (int, float)) and self.is_monetary_field(k):
-                    output_lines.append(f"- **{label}:** {self.format_currency(float(v))}")
+                    sym = self.get_currency_symbol(k, currency_hint=currency_hint)
+                    output_lines.append(f"- **{label}:** {self.format_currency(float(v), symbol=sym)}")
                 else:
                     output_lines.append(f"- **{label}:** {v}")
             output_lines.append(f"\n*(Latency: {latency_ms:.1f}ms)*")
@@ -82,7 +87,8 @@ class AnalyticsFormatter:
             for h in headers:
                 val = r.get(h, "")
                 if isinstance(val, (int, float)) and self.is_monetary_field(h):
-                    row_vals.append(self.format_currency(float(val)))
+                    sym = self.get_currency_symbol(h, currency_hint=currency_hint)
+                    row_vals.append(self.format_currency(float(val), symbol=sym))
                 else:
                     row_vals.append(str(val))
             rows.append("| " + " | ".join(row_vals) + " |")

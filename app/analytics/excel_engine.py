@@ -106,10 +106,17 @@ class ExcelDatabaseEngine:
         tables_meta: Dict[str, Any] = {}
         failed_sheets: List[Dict[str, str]] = []
         total_rows = 0
+        seen_tables: Dict[str, int] = {}
 
         try:
             for sheet in sheet_names:
-                table_name = self._sanitize_name(sheet) or "data_table"
+                base_table = self._sanitize_name(sheet) or "data_table"
+                if base_table in seen_tables:
+                    seen_tables[base_table] += 1
+                    table_name = f"{base_table}_{seen_tables[base_table]}"
+                else:
+                    seen_tables[base_table] = 0
+                    table_name = base_table
                 if xls:
                     try:
                         df = pd.read_excel(xls, sheet_name=sheet)
@@ -309,6 +316,7 @@ class ExcelDatabaseEngine:
         file_id: Optional[str] = None,
         question: str = "",
         history: Optional[List[Dict[str, str]]] = None,
+        currency_hint: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Executes format-aware AI analytics against the resolved data source and datasets.
@@ -484,7 +492,10 @@ STRICT RULES:
             conn.close()
 
         total_latency = round((time.perf_counter() - t_start) * 1000, 2)
-        report = self._format_results(question, target_source.original_filename, rows, col_names, total_latency)
+        effective_currency = currency_hint
+        if not effective_currency and target_source and getattr(target_source, "metadata", None):
+            effective_currency = target_source.metadata.get("currency") or target_source.metadata.get("currency_hint")
+        report = self._format_results(question, target_source.original_filename, rows, col_names, total_latency, currency_hint=effective_currency)
 
         return {
             "success": True,
@@ -496,6 +507,91 @@ STRICT RULES:
             "latency_ms": total_latency,
         }
 
+    @staticmethod
+    def _is_monetary_column(col: str) -> bool:
+        """
+        Determines if a column name represents a monetary currency value.
+        Preserves non-monetary classifications (quantities, counts, ratings, IDs)
+        while correctly identifying currency aliases and compound metrics.
+        """
+        lower = col.lower().strip()
+
+        # 1. Non-monetary exclusions (counts, quantities, ratings, identifiers, dates, percentages, rates)
+        non_monetary_indicators = (
+            "count", "quantity", "qty", "units", "items", "orders",
+            "rating", "score", "phone", "code", "id", "status",
+            "ratio", "rate", "percentage", "percent", "pct", "days", "hours",
+            "year", "month", "rank", "p_val", "index"
+        )
+        if any(non_money in lower for non_money in non_monetary_indicators):
+            return False
+
+        # 1b. Margin percentage exclusions (profit_margin, gross_margin, net_margin unless amount/val is explicit)
+        margin_percentage_indicators = (
+            "profit_margin", "gross_margin", "net_margin", "operating_margin",
+            "ebitda_margin", "margin_rate", "margin_ratio", "margin_pct"
+        )
+        if any(m in lower for m in margin_percentage_indicators):
+            if not any(amt in lower for amt in ("amount", "val", "value", "cash", "bdt", "usd")):
+                return False
+
+        # 2. Direct monetary keyword matches
+        monetary_keywords = (
+            "amount", "price", "cost", "salary", "spent", "fee", "charge",
+            "revenue", "due", "cod", "tax", "vat", "discount", "cash",
+            "payout", "budget", "valuation", "balance", "aov", "gmv",
+            "sales", "profit", "margin", "worth"
+        )
+        if any(kw in lower for kw in monetary_keywords):
+            return True
+
+        # 3. Exact "total" or "grand_total" (without non-monetary suffix)
+        if lower in ("total", "grand_total", "net_total", "sub_total", "subtotal"):
+            return True
+
+        # 4. Specific monetary value compounds (e.g., avg_order_val, order_value, cart_value, monetary_val)
+        monetary_value_compounds = (
+            "order_val", "order_value", "cart_val", "cart_value",
+            "ticket_val", "ticket_value", "monetary_val", "monetary_value",
+            "gross_val", "net_val", "total_val", "total_value", "market_value"
+        )
+        if any(compound in lower for compound in monetary_value_compounds):
+            return True
+
+        return False
+
+    @staticmethod
+    def _get_currency_symbol(col: str, default: str = "৳", currency_hint: Optional[str] = None) -> str:
+        """
+        Determines currency symbol based on:
+        1. Explicit currency_hint / workspace metadata (highest precedence)
+        2. Column name suffix/indicator (USD, EUR, GBP, INR, BDT)
+        3. Default tenant currency fallback (e.g. '৳')
+        """
+        if currency_hint:
+            hint = currency_hint.strip().upper()
+            currency_map = {
+                "USD": "$", "$": "$",
+                "EUR": "€", "€": "€",
+                "GBP": "£", "£": "£",
+                "INR": "₹", "₹": "₹",
+                "BDT": "৳", "৳": "৳", "TK": "৳", "TAKA": "৳"
+            }
+            if hint in currency_map:
+                return currency_map[hint]
+            return currency_hint
+
+        lower = col.lower()
+        if "usd" in lower or "dollar" in lower:
+            return "$"
+        if "eur" in lower or "euro" in lower:
+            return "€"
+        if "inr" in lower or "rupee" in lower:
+            return "₹"
+        if "gbp" in lower or "pound" in lower:
+            return "£"
+        return default
+
     def _format_results(
         self,
         question: str,
@@ -503,6 +599,7 @@ STRICT RULES:
         rows: List[Dict[str, Any]],
         columns: List[str],
         latency_ms: float,
+        currency_hint: Optional[str] = None,
     ) -> str:
         """Formats query rows into a beautiful markdown report."""
         if not rows:
@@ -522,8 +619,9 @@ STRICT RULES:
                 val = r[col]
                 col_label = col.replace("_", " ").title()
                 if isinstance(val, (int, float)):
-                    if any(kw in col.lower() for kw in ("amount", "price", "cost", "salary", "spent", "total", "fee", "revenue", "due", "cod")):
-                        lines.append(f"- **{col_label}:** ৳{val:,.2f}" if val >= 0 else f"- **{col_label}:** -৳{abs(val):,.2f}")
+                    if self._is_monetary_column(col):
+                        sym = self._get_currency_symbol(col, currency_hint=currency_hint)
+                        lines.append(f"- **{col_label}:** {sym}{val:,.2f}" if val >= 0 else f"- **{col_label}:** -{sym}{abs(val):,.2f}")
                     else:
                         lines.append(f"- **{col_label}:** {val:,.2f}" if isinstance(val, float) else f"- **{col_label}:** {val:,}")
                 else:
@@ -534,7 +632,7 @@ STRICT RULES:
 
         headers = [c.replace("_", " ").title() for c in columns]
         lines = [
-            f"📋 **Data Analytics Report** (`{filename}`)\n",
+            f"📋 **Data Analysis Report** (`{filename}`)\n",
             f"> **Question:** {question}\n",
             f"| {' | '.join(headers)} |",
             f"| {' | '.join(['---'] * len(headers))} |",
@@ -547,12 +645,14 @@ STRICT RULES:
                 if val is None:
                     row_vals.append("-")
                 elif isinstance(val, float):
-                    if any(kw in col.lower() for kw in ("amount", "price", "cost", "salary", "spent", "total", "revenue", "due", "cod")):
-                        row_vals.append(f"৳{val:,.2f}")
+                    if self._is_monetary_column(col):
+                        sym = self._get_currency_symbol(col, currency_hint=currency_hint)
+                        row_vals.append(f"{sym}{val:,.2f}")
                     else:
                         row_vals.append(f"{val:,.2f}")
-                elif isinstance(val, int) and any(kw in col.lower() for kw in ("amount", "price", "cost", "salary", "spent", "total", "revenue", "due", "cod")):
-                    row_vals.append(f"৳{val:,}")
+                elif isinstance(val, int) and self._is_monetary_column(col):
+                    sym = self._get_currency_symbol(col, currency_hint=currency_hint)
+                    row_vals.append(f"{sym}{val:,}")
                 else:
                     row_vals.append(str(val))
 
