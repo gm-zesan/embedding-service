@@ -92,14 +92,25 @@ _start_time = time.time()
 
 
 async def verify_api_key(request: Request):
-    """Dependency — validate ``X-API-Key`` header.
+    """Dependency — validate ``X-API-Key`` or ``Authorization: Bearer`` header.
 
-    In ``local`` environment (``APP_ENV=local``) the check is skipped so
-    developers can work without configuring a key.
+    If an ``API_KEY`` is configured, it is strictly validated against every protected endpoint.
+    If no ``API_KEY`` is configured, unauthenticated access is permitted only in local development.
     """
-    if APP_ENV == "local" or not API_KEY:
+    if not API_KEY:
+        if APP_ENV in ("production", "staging"):
+            raise HTTPException(
+                status_code=500,
+                detail="Server misconfiguration: API_KEY must be set in production/staging environments.",
+            )
         return
+
     api_key = request.headers.get("X-API-Key")
+    if not api_key:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            api_key = auth_header[7:].strip()
+
     if not api_key or api_key != API_KEY:
         raise HTTPException(
             status_code=401,
@@ -138,7 +149,7 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-app.include_router(analytics_router)
+app.include_router(analytics_router, dependencies=[Depends(verify_api_key)])
 
 # ---------------------------------------------------------------------------
 # Middleware
