@@ -96,17 +96,28 @@ def parse_typesense_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         total_tokens = tokens_matched + tokens_dropped
         keyword_ratio = (tokens_matched / total_tokens) if total_tokens > 0 else 0.0
 
-        if keyword_ratio >= 0.8 and tokens_matched >= 2:
-            # High full-keyword match confirmation
-            final_score = round(max(semantic_score, 0.50 * semantic_score + 0.50 * keyword_ratio), 4)
-            match_type = "hybrid"
-        elif tokens_matched > 0 and semantic_score > 0.30:
-            # Partial keyword match with moderate semantic support
-            final_score = round(0.80 * semantic_score + 0.20 * keyword_ratio, 4)
-            match_type = "hybrid"
+        if vector_distance is not None:
+            if keyword_ratio >= 0.8 and tokens_matched >= 1:
+                # High full-keyword match confirmation
+                final_score = round(max(semantic_score, 0.50 * semantic_score + 0.50 * keyword_ratio), 4)
+                match_type = "hybrid"
+            elif tokens_matched > 0 and semantic_score > 0.30:
+                # Partial keyword match with moderate semantic support
+                final_score = round(0.80 * semantic_score + 0.20 * keyword_ratio, 4)
+                match_type = "hybrid"
+            else:
+                match_type = "vector"
+                final_score = semantic_score
         else:
-            match_type = "vector"
-            final_score = semantic_score
+            # Pure BM25 text match (degraded / embedding outage fallback)
+            match_type = "bm25"
+            if tokens_matched > 0:
+                # Direct keyword match coverage in BM25 mode:
+                # Scales between 0.65 (partial) and 0.95 (full query coverage)
+                final_score = round(min(0.95, 0.65 + 0.30 * keyword_ratio), 4)
+            else:
+                text_match = hit.get("text_match", 0)
+                final_score = 0.60 if text_match > 0 else 0.50
 
         results.append({
             "id": str(doc.get("id")),
@@ -172,20 +183,36 @@ async def search_knowledge_base(
             detail="workspace_id is required to ensure multi-tenant data isolation.",
         )
 
-    # ── Embedding availability guard ───────────────────────────────────────────
+    # ── Dense Embedding / BM25 Degradation Handling ───────────────────────────
+    raw_vector = None
+    t_embed_ms = 0.0
+    degraded_bm25_fallback = False
+
     if embed is None or not callable(embed):
-        logger.warning("Dense embedding engine unavailable for query [%s]. Raising HTTP 503.", query)
-        raise HTTPException(
-            status_code=503,
-            detail="Embedding engine is unavailable for dense vector search (service degraded).",
+        logger.warning(
+            "Dense embedding engine unavailable for query [%s]. Falling back to pure Typesense BM25 search.",
+            clean_query,
         )
+        degraded_bm25_fallback = True
+        tier_executed = "tier1_bm25_fallback"
+    else:
+        t_embed_start = time.time()
+        try:
+            raw_vector = await asyncio.to_thread(embed, clean_query)
+            t_embed_ms = round((time.time() - t_embed_start) * 1000, 2)
+        except Exception as e:
+            logger.warning(
+                "Dense embedding generation failed for query [%s]: %s. Falling back to pure Typesense BM25 search.",
+                clean_query,
+                e,
+            )
+            raw_vector = None
+            t_embed_ms = round((time.time() - t_embed_start) * 1000, 2)
+            degraded_bm25_fallback = True
+            tier_executed = "tier1_bm25_fallback"
 
-    # ── Tier 1: Fast-Path Raw Dense Hybrid Search ──────────────────────────────
+    # ── Tier 1: Search Execution (Hybrid or Pure BM25 Fallback) ───────────────
     t1_start = time.time()
-    t_embed_start = time.time()
-    raw_vector = await asyncio.to_thread(embed, clean_query)
-    t_embed_ms = round((time.time() - t_embed_start) * 1000, 2)
-
     t_ts_start = time.time()
     first_search_res = await asyncio.to_thread(
         execute_hybrid_search,
@@ -212,7 +239,7 @@ async def search_knowledge_base(
     top_hit_confident = bool(
         first_pass_hits and (
             first_pass_top_score >= 0.60 or
-            (first_pass_hits[0].get("keyword_score", 0.0) >= 0.80 and first_pass_hits[0].get("match_type") == "hybrid")
+            (first_pass_hits[0].get("keyword_score", 0.0) >= 0.80 and first_pass_hits[0].get("match_type") in ("hybrid", "bm25"))
         )
     )
     if not top_hit_confident and first_pass_top_score < expansion_threshold and config.LLM_EXPANSION_API_KEY:
@@ -223,7 +250,13 @@ async def search_knowledge_base(
             expansion_applied = True
             expanded_query = f"{clean_query} {llm_expanded}"
 
-            t_expand_vec = await asyncio.to_thread(embed, expanded_query)
+            t_expand_vec = None
+            if not degraded_bm25_fallback and embed and callable(embed):
+                try:
+                    t_expand_vec = await asyncio.to_thread(embed, expanded_query)
+                except Exception:
+                    t_expand_vec = None
+
             expand_search_res = await asyncio.to_thread(
                 execute_hybrid_search,
                 client=client,
@@ -274,6 +307,7 @@ async def search_knowledge_base(
         "latency_total_ms": total_retrieval_latency_ms,
         "total_retrieval_latency_ms": total_retrieval_latency_ms,
         "returned_faq_ids": returned_faq_ids,
+        "degraded_bm25_fallback": degraded_bm25_fallback,
     })
 
     logger.info(

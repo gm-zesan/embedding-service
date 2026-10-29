@@ -63,32 +63,45 @@ def upsert_faq_document(client: typesense.Client, document: Dict[str, Any]) -> D
     return client.collections[config.TYPESENSE_COLLECTION].documents.upsert(document)
 
 
-def delete_faq_document(client: typesense.Client, doc_id: str) -> Dict[str, Any]:
-    """Delete an FAQ document by ID from Typesense."""
+def delete_faq_document(
+    client: typesense.Client,
+    doc_id: str,
+    workspace_id: int,
+) -> Dict[str, Any]:
+    """Delete an FAQ document by ID from Typesense, strictly scoped to workspace_id."""
+    if not isinstance(workspace_id, int) or isinstance(workspace_id, bool) or workspace_id <= 0:
+        raise ValueError(f"workspace_id must be a positive integer, got: {workspace_id!r}")
+    clean_id = str(doc_id).strip() if doc_id is not None else ""
+    if not clean_id:
+        raise ValueError(f"doc_id must be a non-empty string, got: {doc_id!r}")
+
     try:
-        return client.collections[config.TYPESENSE_COLLECTION].documents[str(doc_id)].delete()
+        return client.collections[config.TYPESENSE_COLLECTION].documents.delete({
+            'filter_by': f'id:={clean_id} && workspace_id:={workspace_id}'
+        })
     except typesense.exceptions.ObjectNotFound:
-        return {'id': str(doc_id), 'deleted': False}
+        return {'id': clean_id, 'deleted': False, 'num_deleted': 0}
 
 
 def execute_hybrid_search(
     client: typesense.Client,
     query_text: str,
-    query_vector: List[float],
+    query_vector: Optional[List[float]] = None,
     workspace_id: Optional[int] = None,
     top_k: int = 5,
 ) -> Dict[str, Any]:
-    """Execute native Typesense hybrid search using multi_search (POST) to support large 768-d vector payloads."""
-    vector_str = f"embedding:([{','.join(f'{x:.5f}' for x in query_vector)}], k:{max(50, top_k * 5)}, alpha:0.7)"
-
+    """Execute Typesense search: hybrid vector+text if query_vector is provided, or pure BM25 keyword search if query_vector is None."""
     search_query = {
         'collection': config.TYPESENSE_COLLECTION,
         'q': query_text if query_text.strip() else '*',
         'query_by': 'question,answer,lexicon_terms',
         'query_by_weights': '4,2,3',
-        'vector_query': vector_str,
         'per_page': top_k,
     }
+
+    if query_vector:
+        vector_str = f"embedding:([{','.join(f'{x:.5f}' for x in query_vector)}], k:{max(50, top_k * 5)}, alpha:0.7)"
+        search_query['vector_query'] = vector_str
 
     filter_clauses = ['is_active:=true']
     if workspace_id is not None:

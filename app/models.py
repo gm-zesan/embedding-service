@@ -1,6 +1,7 @@
+import math
 from typing import List, Optional, Any
 # pyrefly: ignore [missing-import]
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.config import MAX_TEXT_LENGTH, MAX_BATCH_SIZE
 
@@ -88,6 +89,7 @@ class RetrievalTelemetry(BaseModel):
     shadow_match_concept: Optional[bool] = None
     shadow_match_expansion: Optional[bool] = None
     shadow_match_rerank: Optional[bool] = None
+    degraded_bm25_fallback: bool = False
 
 
 class SearchResponse(BaseModel):
@@ -109,6 +111,30 @@ class SyncFAQRequest(BaseModel):
     priority: int = 0
     is_active: bool = True
     lexicon_terms: List[str] = []
+
+    @field_validator("lexicon_terms", mode="before")
+    @classmethod
+    def coerce_lexicon_terms(cls, v: Any) -> List[str]:
+        if isinstance(v, (str, int, float)) and not isinstance(v, bool):
+            raw_list = [v]
+        elif isinstance(v, (list, tuple, set)):
+            raw_list = list(v)
+        else:
+            return []
+
+        result: List[str] = []
+        for item in raw_list:
+            if item is None or isinstance(item, bool):
+                continue
+            if isinstance(item, (int, float)):
+                if isinstance(item, float) and not math.isfinite(item):
+                    continue
+                result.append(str(item))
+            elif isinstance(item, str):
+                cleaned = item.strip()
+                if cleaned:
+                    result.append(cleaned)
+        return result
 
 
 class SyncFAQResponse(BaseModel):

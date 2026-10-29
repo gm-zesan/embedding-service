@@ -12,7 +12,7 @@ MODEL_NAME = os.getenv("MODEL_NAME", "paraphrase-multilingual-mpnet-base-v2")
 EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "32"))
 
 # -- Server --
-HOST = os.getenv("HOST", "0.0.0.0")
+HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", 8001))
 ALLOWED_ORIGINS = [
     o.strip()
@@ -22,6 +22,7 @@ ALLOWED_ORIGINS = [
 
 # -- Security --
 API_KEY = os.getenv("API_KEY", "")
+ALLOW_UNAUTHENTICATED_DEV = os.getenv("ALLOW_UNAUTHENTICATED_DEV", "false").lower() in ("true", "1")
 
 # -- Limits --
 MAX_TEXT_LENGTH = int(os.getenv("MAX_TEXT_LENGTH", "8192"))

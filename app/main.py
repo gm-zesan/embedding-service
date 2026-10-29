@@ -1,4 +1,5 @@
 import logging
+import secrets
 import time
 import uuid
 from typing import Optional, Dict, Any
@@ -9,7 +10,7 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
 # pyrefly: ignore [missing-import]
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Request, Depends, Query
 # pyrefly: ignore [missing-import]
 from fastapi.middleware.cors import CORSMiddleware
 # pyrefly: ignore [missing-import]
@@ -45,6 +46,7 @@ from app.models import (
 from app.config import (
     API_KEY,
     APP_ENV,
+    ALLOW_UNAUTHENTICATED_DEV,
     MAX_REQUEST_SIZE,
     MODEL_NAME,
     ALLOWED_ORIGINS,
@@ -94,16 +96,19 @@ _start_time = time.time()
 async def verify_api_key(request: Request):
     """Dependency — validate ``X-API-Key`` or ``Authorization: Bearer`` header.
 
-    If an ``API_KEY`` is configured, it is strictly validated against every protected endpoint.
-    If no ``API_KEY`` is configured, unauthenticated access is permitted only in local development.
+    Authentication is strictly enforced by default across all environments.
+    Unauthenticated access is strictly forbidden in any deployed environment (production,
+    staging, prod, live, etc.). A development bypass is permitted ONLY when APP_ENV is
+    explicitly in ("local", "testing", "test") AND ALLOW_UNAUTHENTICATED_DEV=true is set.
     """
     if not API_KEY:
-        if APP_ENV in ("production", "staging"):
-            raise HTTPException(
-                status_code=500,
-                detail="Server misconfiguration: API_KEY must be set in production/staging environments.",
-            )
-        return
+        # Positive whitelist: permit unauthenticated access ONLY in explicitly authorized local/test environments
+        if APP_ENV in ("local", "testing", "test") and ALLOW_UNAUTHENTICATED_DEV:
+            return
+        raise HTTPException(
+            status_code=500,
+            detail="Server misconfiguration: API_KEY must be configured. Unauthenticated access is strictly forbidden outside local development with ALLOW_UNAUTHENTICATED_DEV=true.",
+        )
 
     api_key = request.headers.get("X-API-Key")
     if not api_key:
@@ -111,7 +116,7 @@ async def verify_api_key(request: Request):
         if auth_header.startswith("Bearer "):
             api_key = auth_header[7:].strip()
 
-    if not api_key or api_key != API_KEY:
+    if not api_key or not secrets.compare_digest(api_key, API_KEY):
         raise HTTPException(
             status_code=401,
             detail="Invalid or missing API key",
@@ -155,12 +160,14 @@ app.include_router(analytics_router, dependencies=[Depends(verify_api_key)])
 # Middleware
 # ---------------------------------------------------------------------------
 
+# Backend-only retrieval API: Never use wildcard fallback ["*"] with credentials.
+# Only allow explicitly configured trusted origins; reject external browser origins by default.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS else ["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=bool(ALLOWED_ORIGINS),
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Request-ID"],
 )
 
 
@@ -343,12 +350,15 @@ def sync_faq(request: SyncFAQRequest):
     tags=["Knowledge Retrieval"],
     dependencies=[Depends(verify_api_key)],
 )
-def delete_faq(faq_id: str):
+def delete_faq(
+    faq_id: str,
+    workspace_id: int = Query(..., gt=0, description="Mandatory workspace ID (> 0)"),
+):
     """
-    Delete FAQ document and its embedding from Typesense.
+    Delete FAQ document and its embedding from Typesense, strictly scoped to workspace_id.
     """
     client = get_typesense_client()
-    delete_faq_document(client, faq_id)
+    delete_faq_document(client, faq_id, workspace_id=workspace_id)
 
     return DeleteFAQResponse(status="deleted", id=faq_id)
 
