@@ -58,3 +58,9 @@ RERANKER_MULTI_ENTITY_ENABLED = os.getenv("RERANKER_MULTI_ENTITY_ENABLED", "true
 # -- Laravel Integration --
 LARAVEL_API_URL = os.getenv("LARAVEL_API_URL", "http://127.0.0.1:8000")
 
+# -- Analytics & Virtual SQLite Resource Guards (IMP-ANL-001) --
+ANALYTICS_MAX_SHEETS = int(os.getenv("ANALYTICS_MAX_SHEETS", "10"))
+ANALYTICS_MAX_ROWS_PER_SHEET = int(os.getenv("ANALYTICS_MAX_ROWS_PER_SHEET", "100000"))
+ANALYTICS_QUERY_TIMEOUT_SECONDS = float(os.getenv("ANALYTICS_QUERY_TIMEOUT_SECONDS", "15.0"))
+
+

@@ -32,6 +32,7 @@ from .source_resolver import DataSourceResolver, source_resolver
 from .dataset_classifier import dataset_classifier, DatasetClassifier
 from .semantic_schema import profile_dataset_columns
 from .semantic_interpreter import get_semantic_interpreter
+from app import config
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -43,10 +44,21 @@ class ExcelDatabaseEngine:
     workspace isolation, and format-aware AI Q&A.
     """
 
-    def __init__(self, registry: Optional[DataSourceRegistry] = None, resolver: Optional[DataSourceResolver] = None):
+    def __init__(
+        self,
+        registry: Optional[DataSourceRegistry] = None,
+        resolver: Optional[DataSourceResolver] = None,
+        max_sheets: Optional[int] = None,
+        max_rows_per_sheet: Optional[int] = None,
+        query_timeout: Optional[float] = None,
+    ):
         self.registry = registry or source_registry
         self.resolver = resolver or source_resolver
         self.storage_dir = self.registry.storage_dir
+
+        self.max_sheets = max_sheets if max_sheets is not None else getattr(config, "ANALYTICS_MAX_SHEETS", 10)
+        self.max_rows_per_sheet = max_rows_per_sheet if max_rows_per_sheet is not None else getattr(config, "ANALYTICS_MAX_ROWS_PER_SHEET", 100000)
+        self.query_timeout = query_timeout if query_timeout is not None else getattr(config, "ANALYTICS_QUERY_TIMEOUT_SECONDS", 15.0)
 
         api_key = os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY") or "dummy-key-for-init"
         base_url = os.getenv("LLM_BASE_URL") or os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
@@ -78,6 +90,10 @@ class ExcelDatabaseEngine:
             fmt = DataSourceFormat.XLSX if ext == ".xlsx" else DataSourceFormat.XLS
             xls = pd.ExcelFile(file_path)
             sheet_names = xls.sheet_names
+            if len(sheet_names) > self.max_sheets:
+                raise ValueError(
+                    f"Workbook exceeds maximum allowed sheets limit ({self.max_sheets}). Found {len(sheet_names)} sheets."
+                )
         elif ext == ".csv":
             fmt = DataSourceFormat.CSV
             sheet_names = ["Sheet1"]
@@ -119,19 +135,25 @@ class ExcelDatabaseEngine:
                     table_name = base_table
                 if xls:
                     try:
-                        df = pd.read_excel(xls, sheet_name=sheet)
+                        # Enforce row bounds during streaming/reading to prevent unbounded memory allocation
+                        df = pd.read_excel(xls, sheet_name=sheet, nrows=self.max_rows_per_sheet + 1)
                     except Exception as sheet_err:
                         logger.warning(f"[ExcelEngine] Error reading sheet '{sheet}' from {original_filename}: {sheet_err}")
                         failed_sheets.append({"sheet": sheet, "error": str(sheet_err)})
                         continue
                 else:
                     try:
-                        df = pd.read_csv(file_path, encoding="utf-8")
+                        df = pd.read_csv(file_path, encoding="utf-8", nrows=self.max_rows_per_sheet + 1)
                     except UnicodeDecodeError:
                         try:
-                            df = pd.read_csv(file_path, encoding="utf-8-sig")
+                            df = pd.read_csv(file_path, encoding="utf-8-sig", nrows=self.max_rows_per_sheet + 1)
                         except UnicodeDecodeError:
-                            df = pd.read_csv(file_path, encoding="latin1")
+                            df = pd.read_csv(file_path, encoding="latin1", nrows=self.max_rows_per_sheet + 1)
+
+                if len(df) > self.max_rows_per_sheet:
+                    raise ValueError(
+                        f"Worksheet '{sheet}' exceeds maximum allowed data rows limit ({self.max_rows_per_sheet:,})."
+                    )
 
                 if df.empty and len(df.columns) == 0:
                     failed_sheets.append({"sheet": sheet, "error": "Empty sheet or no columns"})
@@ -231,6 +253,13 @@ class ExcelDatabaseEngine:
                     "purpose": semantic_schema.purpose,
                     "primary_entity": semantic_schema.primary_entity,
                 }
+        except Exception:
+            if os.path.exists(db_path):
+                try:
+                    os.remove(db_path)
+                except OSError:
+                    pass
+            raise
         finally:
             conn.close()
 
@@ -309,6 +338,63 @@ class ExcelDatabaseEngine:
         if src:
             return src.model_dump()
         return None
+
+    def execute_sql_query(
+        self,
+        db_path: str,
+        sql: str,
+        timeout: Optional[float] = None,
+        max_results: int = 50,
+    ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """
+        Executes a read-only SQL query against an isolated SQLite database file.
+        Enforces read-only PRAGMA and query execution deadline via set_progress_handler.
+        Returns (rows, column_names).
+        Raises TimeoutError on query deadline exceeded.
+        """
+        effective_timeout = timeout if timeout is not None else self.query_timeout
+
+        try:
+            db_uri = f"{Path(os.path.abspath(db_path)).as_uri()}?mode=ro"
+            conn = sqlite3.connect(db_uri, uri=True, timeout=5.0)
+        except Exception:
+            conn = sqlite3.connect(db_path, timeout=5.0)
+
+        conn.row_factory = sqlite3.Row
+
+        deadline = time.monotonic() + effective_timeout
+        timed_out = False
+
+        def progress_handler() -> int:
+            nonlocal timed_out
+            if time.monotonic() > deadline:
+                timed_out = True
+                return 1
+            return 0
+
+        # Check every 1,000 SQLite VM opcodes
+        conn.set_progress_handler(progress_handler, 1000)
+
+        try:
+            conn.execute("PRAGMA query_only = ON;")
+            cursor = conn.cursor()
+            cursor.execute(sql)
+            results = cursor.fetchall()
+            col_names = list(results[0].keys()) if results else []
+            rows = [dict(r) for r in results[:max_results]]
+            return rows, col_names
+        except sqlite3.OperationalError as e:
+            if timed_out or "interrupted" in str(e).lower():
+                raise TimeoutError(
+                    f"The database query exceeded the execution time limit ({effective_timeout}s) and was safely stopped."
+                ) from e
+            raise
+        finally:
+            try:
+                conn.set_progress_handler(None, 0)
+            except Exception:
+                pass
+            conn.close()
 
     def query_excel(
         self,
@@ -461,35 +547,30 @@ STRICT RULES:
                 "latency_ms": round((time.perf_counter() - t_start) * 1000, 2),
             }
 
-        # ── 6. Execute against Sandboxed SQLite DB (Read-Only Enforced) ─
-        rows = []
-        col_names = []
+        # ── 6. Execute against Sandboxed SQLite DB (Read-Only & Timeout Enforced) ─
         try:
-            db_uri = f"{Path(os.path.abspath(db_path)).as_uri()}?mode=ro"
-            conn = sqlite3.connect(db_uri, uri=True, timeout=5.0)
-        except Exception:
-            conn = sqlite3.connect(db_path, timeout=5.0)
-
-        conn.row_factory = sqlite3.Row
-        try:
-            conn.execute("PRAGMA query_only = ON;")
-            cursor = conn.cursor()
-            cursor.execute(sql)
-            results = cursor.fetchall()
-            if results:
-                col_names = results[0].keys()
-                rows = [dict(r) for r in results[:50]]
+            rows, col_names = self.execute_sql_query(
+                db_path=db_path,
+                sql=sql,
+                timeout=self.query_timeout,
+                max_results=50,
+            )
+        except TimeoutError as te:
+            logger.warning(f"[ExcelDatabaseEngine] Query timed out after {self.query_timeout}s: {te}")
+            return {
+                "success": False,
+                "report": f"⚠️ **Query Timeout Notice**: The database query exceeded the maximum execution time limit ({self.query_timeout}s) and was safely stopped.",
+                "rows": [],
+                "latency_ms": round((time.perf_counter() - t_start) * 1000, 2),
+            }
         except Exception as e:
             logger.error(f"[ExcelDatabaseEngine] SQL Execution error: {e} for SQL: {sql}")
             return {
                 "success": False,
-                "report": f"⚠️ **Query Execution Notice**: {str(e)}",
-                "sql": sql,
+                "report": "⚠️ **Query Execution Notice**: The query could not be executed due to a database syntax or execution error.",
                 "rows": [],
                 "latency_ms": round((time.perf_counter() - t_start) * 1000, 2),
             }
-        finally:
-            conn.close()
 
         total_latency = round((time.perf_counter() - t_start) * 1000, 2)
         effective_currency = currency_hint
