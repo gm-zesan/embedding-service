@@ -24,6 +24,7 @@ from .excel_engine import excel_engine
 # Shared Safe Execution and Formatting
 from .executor import AnalyticsExecutor, SecurityViolationError
 from .formatter import AnalyticsFormatter
+from app import config
 
 logger = logging.getLogger(__name__)
 
@@ -317,14 +318,43 @@ async def upload_analytical_source(
             detail=f"Unsupported file format: {ext}. Supported formats: .xlsx, .xls, .csv",
         )
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-        try:
-            shutil.copyfileobj(file.file, tmp)
-            tmp_path = tmp.name
-        finally:
-            file.file.close()
+    raw_max = getattr(config, "ANALYTICS_MAX_UPLOAD_SIZE_BYTES", 20 * 1024 * 1024)
+    try:
+        max_bytes = int(raw_max)
+        if max_bytes <= 0:
+            max_bytes = 20 * 1024 * 1024
+    except (ValueError, TypeError):
+        max_bytes = 20 * 1024 * 1024
+
+    chunk_size = 64 * 1024  # 64 KiB
+    total_bytes = 0
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+    tmp_path = tmp.name
 
     try:
+        try:
+            while True:
+                # Bounded read: reads up to chunk_size but never more than 1 byte past max_bytes
+                remaining = (max_bytes - total_bytes) + 1
+                to_read = min(chunk_size, remaining)
+                chunk = file.file.read(to_read)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > max_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=(
+                            f"Uploaded file exceeds maximum allowed size of {max_bytes} bytes "
+                            f"({max_bytes // (1024 * 1024)} MiB)."
+                        ),
+                    )
+                tmp.write(chunk)
+        finally:
+            tmp.close()
+            file.file.close()
+
         result = excel_engine.ingest_excel_file(
             file_path=tmp_path,
             original_filename=filename,
@@ -333,6 +363,9 @@ async def upload_analytical_source(
             source_id=source_id,
         )
         return result
+    except HTTPException:
+        # Re-raise standard HTTP exceptions (e.g. 413) without converting to 422
+        raise
     except Exception as e:
         logger.error(f"[Source Ingestion] Failed to ingest {filename}: {e}", exc_info=True)
         raise HTTPException(

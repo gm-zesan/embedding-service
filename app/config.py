@@ -1,6 +1,7 @@
 # pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 import os
+from typing import Optional
 
 load_dotenv()
 
@@ -62,5 +63,20 @@ LARAVEL_API_URL = os.getenv("LARAVEL_API_URL", "http://127.0.0.1:8000")
 ANALYTICS_MAX_SHEETS = int(os.getenv("ANALYTICS_MAX_SHEETS", "10"))
 ANALYTICS_MAX_ROWS_PER_SHEET = int(os.getenv("ANALYTICS_MAX_ROWS_PER_SHEET", "100000"))
 ANALYTICS_QUERY_TIMEOUT_SECONDS = float(os.getenv("ANALYTICS_QUERY_TIMEOUT_SECONDS", "15.0"))
+
+
+def _parse_positive_int(raw: Optional[str], default: int) -> int:
+    try:
+        val = int(raw) if raw is not None and str(raw).strip() != "" else default
+        return val if val > 0 else default
+    except (ValueError, TypeError):
+        return default
+
+
+ANALYTICS_MAX_UPLOAD_SIZE_BYTES = _parse_positive_int(
+    os.getenv("ANALYTICS_MAX_UPLOAD_SIZE_BYTES"),
+    default=20 * 1024 * 1024,
+)  # 20 MiB default
+
 
 

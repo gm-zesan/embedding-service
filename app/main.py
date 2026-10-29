@@ -51,6 +51,7 @@ from app.config import (
     MODEL_NAME,
     ALLOWED_ORIGINS,
 )
+from app import config
 from app.typesense_engine import (
     get_typesense_client,
     ensure_faq_collection,
@@ -192,7 +193,16 @@ async def add_process_time(request: Request, call_next):
 @app.middleware("http")
 async def limit_request_size(request: Request, call_next):
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > MAX_REQUEST_SIZE:
+    max_size = MAX_REQUEST_SIZE
+    if request.url.path in ("/analytics/sources/upload", "/analytics/excel/upload"):
+        analytics_max = getattr(config, "ANALYTICS_MAX_UPLOAD_SIZE_BYTES", 20 * 1024 * 1024)
+        try:
+            analytics_max = int(analytics_max) if int(analytics_max) > 0 else 20 * 1024 * 1024
+        except (ValueError, TypeError):
+            analytics_max = 20 * 1024 * 1024
+        max_size = analytics_max + (1024 * 1024)
+
+    if content_length and int(content_length) > max_size:
         return JSONResponse(
             status_code=413,
             content=ErrorResponse(detail="Request too large").model_dump(),
