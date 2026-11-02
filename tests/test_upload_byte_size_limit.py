@@ -281,6 +281,281 @@ class TestUploadByteSizeLimit(unittest.TestCase):
         self.assertNotEqual(response.status_code, 413)
         self.assertEqual(response.status_code, 422)
 
+    def test_middleware_rejects_malformed_content_length_with_400(self):
+        """Malformed Content-Length headers return HTTP 400 Bad Request."""
+        response = self.client.post(
+            "/analytics/sources/upload",
+            headers={"Content-Length": "invalid_length"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json().get("detail"), "Invalid Content-Length header")
+
+    def test_middleware_rejects_negative_content_length_with_400(self):
+        """Negative Content-Length headers return HTTP 400 Bad Request."""
+        response = self.client.post(
+            "/analytics/sources/upload",
+            headers={"Content-Length": "-500"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json().get("detail"), "Invalid negative Content-Length header")
+
+    def test_middleware_rejects_duplicate_conflicting_content_length_with_400(self):
+        """Conflicting duplicate Content-Length headers return HTTP 400 Bad Request."""
+        import asyncio
+        import json
+
+        async def run_duplicate_cl():
+            async def receive():
+                return {"type": "http.request", "body": b"", "more_body": False}
+
+            status_code = None
+            body_chunks = []
+            async def send(message):
+                nonlocal status_code
+                if message["type"] == "http.response.start":
+                    status_code = message["status"]
+                elif message["type"] == "http.response.body":
+                    body_chunks.append(message.get("body", b""))
+
+            scope = {
+                "type": "http",
+                "method": "POST",
+                "path": "/analytics/sources/upload",
+                "query_string": b"",
+                "headers": [
+                    (b"host", b"testserver"),
+                    (b"content-length", b"100"),
+                    (b"content-length", b"200"),
+                ],
+            }
+            await app(scope, receive, send)
+            body = b"".join(body_chunks).decode("utf-8", errors="replace")
+            return status_code, json.loads(body)
+
+        status, data = asyncio.run(run_duplicate_cl())
+        self.assertEqual(status, 400)
+        self.assertEqual(data.get("detail"), "Invalid duplicate Content-Length header")
+
+    def test_chunked_streaming_under_limit_accepted(self):
+        """Chunked multipart stream without Content-Length below limit is parsed and accepted."""
+        import asyncio
+        import json
+
+        boundary = "----TestBoundaryUnderLimit"
+        part_header = (
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"workspace_id\"\r\n\r\n"
+            f"1\r\n"
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"file\"; filename=\"test_chunked.csv\"\r\n"
+            f"Content-Type: text/csv\r\n\r\n"
+        ).encode("utf-8")
+        chunk_data = b"col1,col2\nval1,val2\n"
+        chunk_footer = f"\r\n--{boundary}--\r\n".encode("utf-8")
+        chunks = [part_header, chunk_data, chunk_footer]
+
+        async def run_chunked_under():
+            chunks_read = 0
+            idx = 0
+
+            async def receive():
+                nonlocal chunks_read, idx
+                if idx >= len(chunks):
+                    return {"type": "http.request", "body": b"", "more_body": False}
+                chunk = chunks[idx]
+                idx += 1
+                chunks_read += 1
+                return {"type": "http.request", "body": chunk, "more_body": (idx < len(chunks))}
+
+            status_code = None
+            body_chunks = []
+            async def send(message):
+                nonlocal status_code
+                if message["type"] == "http.response.start":
+                    status_code = message["status"]
+                elif message["type"] == "http.response.body":
+                    body_chunks.append(message.get("body", b""))
+
+            scope = {
+                "type": "http",
+                "method": "POST",
+                "path": "/analytics/sources/upload",
+                "query_string": b"",
+                "headers": [
+                    (b"host", b"testserver"),
+                    (b"x-api-key", self.test_key.encode("utf-8")),
+                    (b"content-type", f"multipart/form-data; boundary={boundary}".encode("utf-8")),
+                ],
+            }
+            await app(scope, receive, send)
+            body = b"".join(body_chunks).decode("utf-8", errors="replace")
+            return status_code, chunks_read, json.loads(body)
+
+        status, chunks_read, data = asyncio.run(run_chunked_under())
+        self.assertEqual(status, 200)
+        self.assertEqual(chunks_read, len(chunks))
+        self.assertTrue(data.get("success"))
+
+    def test_chunked_streaming_oversized_aborts_early_and_returns_413(self):
+        """Chunked stream exceeding byte limit without Content-Length aborts early with HTTP 413."""
+        import asyncio
+        import json
+
+        boundary = "----TestBoundaryOversized"
+        part_header = (
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"workspace_id\"\r\n\r\n"
+            f"1\r\n"
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"file\"; filename=\"test_oversized.csv\"\r\n"
+            f"Content-Type: text/csv\r\n\r\n"
+        ).encode("utf-8")
+
+        chunk_data = b"col1,col2\n" + (b"A" * 65520) + b"\n"
+        chunk_footer = f"\r\n--{boundary}--\r\n".encode("utf-8")
+        # 42 chunks * 64 KiB ~= 2.75 MB
+        chunks = [part_header] + [chunk_data for _ in range(40)] + [chunk_footer]
+
+        async def run_chunked_over():
+            chunks_read = 0
+            idx = 0
+
+            async def receive():
+                nonlocal chunks_read, idx
+                if idx >= len(chunks):
+                    return {"type": "http.request", "body": b"", "more_body": False}
+                chunk = chunks[idx]
+                idx += 1
+                chunks_read += 1
+                return {"type": "http.request", "body": chunk, "more_body": (idx < len(chunks))}
+
+            status_code = None
+            body_chunks = []
+            async def send(message):
+                nonlocal status_code
+                if message["type"] == "http.response.start":
+                    status_code = message["status"]
+                elif message["type"] == "http.response.body":
+                    body_chunks.append(message.get("body", b""))
+
+            scope = {
+                "type": "http",
+                "method": "POST",
+                "path": "/analytics/sources/upload",
+                "query_string": b"",
+                "headers": [
+                    (b"host", b"testserver"),
+                    (b"x-api-key", self.test_key.encode("utf-8")),
+                    (b"content-type", f"multipart/form-data; boundary={boundary}".encode("utf-8")),
+                ],
+            }
+            # Limit: 64 KiB for analytics (+ 1 MiB allowance in middleware = 1,114,112 bytes)
+            with patch.object(config, "ANALYTICS_MAX_UPLOAD_SIZE_BYTES", 64 * 1024):
+                await app(scope, receive, send)
+
+            body = b"".join(body_chunks).decode("utf-8", errors="replace")
+            return status_code, chunks_read, json.loads(body)
+
+        status, chunks_read, data = asyncio.run(run_chunked_over())
+        self.assertEqual(status, 413)
+        self.assertEqual(data.get("detail"), "Request too large")
+        # 18 chunks of ~64 KiB = ~1.17 MB crosses the 1.06 MB threshold
+        self.assertEqual(
+            chunks_read,
+            18,
+            f"Expected streaming early abort at chunk 18, but read {chunks_read} chunks",
+        )
+        self.assertLess(chunks_read, len(chunks))
+
+    def test_forged_small_content_length_with_oversized_stream_returns_413(self):
+        """Forged small Content-Length header is caught by incremental streaming counter."""
+        import asyncio
+        import json
+
+        boundary = "----TestBoundaryForged"
+        part_header = (
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"workspace_id\"\r\n\r\n"
+            f"1\r\n"
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"file\"; filename=\"test_forged.csv\"\r\n"
+            f"Content-Type: text/csv\r\n\r\n"
+        ).encode("utf-8")
+
+        chunk_data = b"col1,col2\n" + (b"A" * 65520) + b"\n"
+        chunk_footer = f"\r\n--{boundary}--\r\n".encode("utf-8")
+        chunks = [part_header] + [chunk_data for _ in range(40)] + [chunk_footer]
+
+        async def run_forged_stream():
+            chunks_read = 0
+            idx = 0
+
+            async def receive():
+                nonlocal chunks_read, idx
+                if idx >= len(chunks):
+                    return {"type": "http.request", "body": b"", "more_body": False}
+                chunk = chunks[idx]
+                idx += 1
+                chunks_read += 1
+                return {"type": "http.request", "body": chunk, "more_body": (idx < len(chunks))}
+
+            status_code = None
+            body_chunks = []
+            async def send(message):
+                nonlocal status_code
+                if message["type"] == "http.response.start":
+                    status_code = message["status"]
+                elif message["type"] == "http.response.body":
+                    body_chunks.append(message.get("body", b""))
+
+            scope = {
+                "type": "http",
+                "method": "POST",
+                "path": "/analytics/sources/upload",
+                "query_string": b"",
+                "headers": [
+                    (b"host", b"testserver"),
+                    (b"x-api-key", self.test_key.encode("utf-8")),
+                    (b"content-length", b"100"),  # Forged small Content-Length
+                    (b"content-type", f"multipart/form-data; boundary={boundary}".encode("utf-8")),
+                ],
+            }
+            with patch.object(config, "ANALYTICS_MAX_UPLOAD_SIZE_BYTES", 64 * 1024):
+                await app(scope, receive, send)
+
+            body = b"".join(body_chunks).decode("utf-8", errors="replace")
+            return status_code, chunks_read, json.loads(body)
+
+        status, chunks_read, data = asyncio.run(run_forged_stream())
+        self.assertEqual(status, 413)
+        self.assertEqual(data.get("detail"), "Request too large")
+        self.assertEqual(chunks_read, 18)
+
+    def test_valid_upload_near_configured_limit_succeeds(self):
+        """Upload file size at ~98% of the configured limit succeeds with HTTP 200."""
+        # 50 KiB limit
+        limit = 50 * 1024
+        row = b"ItemABC,12345,Description_Text_Here\n"
+        rows_needed = (49 * 1024) // len(row)
+        csv_content = b"col1,col2,col3\n" + (row * rows_needed)
+
+        # Confirm test file is near 98% of limit
+        self.assertGreater(len(csv_content), limit * 0.95)
+        self.assertLess(len(csv_content), limit)
+
+        with patch.object(config, "ANALYTICS_MAX_UPLOAD_SIZE_BYTES", limit):
+            response = self.client.post(
+                "/analytics/sources/upload",
+                files={"file": ("near_limit.csv", io.BytesIO(csv_content), "text/csv")},
+                data={"workspace_id": 1},
+                headers=self.auth_headers,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data.get("success"))
+        self.assertEqual(data.get("filename"), "near_limit.csv")
+
 
 if __name__ == "__main__":
     unittest.main()

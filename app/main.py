@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 # pyrefly: ignore [missing-import]
 from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Scope, Receive, Send, Message
 
 try:
     from app.embedding import (
@@ -190,24 +191,113 @@ async def add_process_time(request: Request, call_next):
     return response
 
 
-@app.middleware("http")
-async def limit_request_size(request: Request, call_next):
-    content_length = request.headers.get("content-length")
-    max_size = MAX_REQUEST_SIZE
-    if request.url.path in ("/analytics/sources/upload", "/analytics/excel/upload"):
-        analytics_max = getattr(config, "ANALYTICS_MAX_UPLOAD_SIZE_BYTES", 20 * 1024 * 1024)
-        try:
-            analytics_max = int(analytics_max) if int(analytics_max) > 0 else 20 * 1024 * 1024
-        except (ValueError, TypeError):
-            analytics_max = 20 * 1024 * 1024
-        max_size = analytics_max + (1024 * 1024)
+class StreamingRequestSizeLimitMiddleware:
+    """
+    ASGI-level streaming request body size limiter.
+    Enforces maximum request body limits across declared Content-Length headers,
+    missing Content-Length, malformed/negative headers, and chunked transfer encoding.
+    Does NOT buffer the request body in memory; counts actual ASGI stream bytes incrementally.
+    """
+    def __init__(self, app: ASGIApp):
+        self.app = app
 
-    if content_length and int(content_length) > max_size:
-        return JSONResponse(
-            status_code=413,
-            content=ErrorResponse(detail="Request too large").model_dump(),
-        )
-    return await call_next(request)
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        clean_path = path.rstrip("/")
+        max_size = MAX_REQUEST_SIZE
+        if clean_path in ("/analytics/sources/upload", "/analytics/excel/upload"):
+            analytics_max = getattr(config, "ANALYTICS_MAX_UPLOAD_SIZE_BYTES", 20 * 1024 * 1024)
+            try:
+                analytics_max = int(analytics_max) if int(analytics_max) > 0 else 20 * 1024 * 1024
+            except (ValueError, TypeError):
+                analytics_max = 20 * 1024 * 1024
+            # 1 MiB allowance for multipart boundaries, headers, and form-data fields
+            max_size = analytics_max + (1024 * 1024)
+
+        # 1. Early rejection via Content-Length header if present
+        content_length_raw = None
+        for name, value in scope.get("headers", []):
+            if name.lower() == b"content-length":
+                if content_length_raw is not None and content_length_raw.strip() != value.strip():
+                    response = JSONResponse(
+                        status_code=400,
+                        content=ErrorResponse(detail="Invalid duplicate Content-Length header").model_dump(),
+                    )
+                    await response(scope, receive, send)
+                    return
+                content_length_raw = value
+
+        if content_length_raw is not None:
+            try:
+                cl_str = content_length_raw.decode("latin-1").strip()
+                content_length = int(cl_str)
+            except (ValueError, UnicodeDecodeError):
+                response = JSONResponse(
+                    status_code=400,
+                    content=ErrorResponse(detail="Invalid Content-Length header").model_dump(),
+                )
+                await response(scope, receive, send)
+                return
+
+            if content_length < 0:
+                response = JSONResponse(
+                    status_code=400,
+                    content=ErrorResponse(detail="Invalid negative Content-Length header").model_dump(),
+                )
+                await response(scope, receive, send)
+                return
+
+            if content_length > max_size:
+                response = JSONResponse(
+                    status_code=413,
+                    content=ErrorResponse(detail="Request too large").model_dump(),
+                )
+                await response(scope, receive, send)
+                return
+
+        # 2. Incremental streaming body size limiter for chunked or unstated bodies
+        total_bytes = 0
+        limit_exceeded = False
+        response_started = False
+
+        async def limited_receive() -> Message:
+            nonlocal total_bytes, limit_exceeded
+            message = await receive()
+            if message["type"] == "http.request":
+                body = message.get("body", b"")
+                total_bytes += len(body)
+                if total_bytes > max_size:
+                    limit_exceeded = True
+                    raise ValueError("Request body exceeded limit")
+            return message
+
+        async def tracking_send(message: Message) -> None:
+            nonlocal response_started
+            if limit_exceeded:
+                return  # suppress downstream error response generated by aborted read
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracking_send)
+        except Exception:
+            if not limit_exceeded:
+                raise
+
+        if limit_exceeded and not response_started:
+            response = JSONResponse(
+                status_code=413,
+                content=ErrorResponse(detail="Request too large").model_dump(),
+            )
+            await response(scope, receive, send)
+
+
+app.add_middleware(StreamingRequestSizeLimitMiddleware)
 
 
 # ---------------------------------------------------------------------------

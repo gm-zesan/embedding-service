@@ -40,6 +40,87 @@ class ColumnSemanticDescriptor(BaseModel):
     evidence: List[str] = Field(default_factory=list)
 
 
+class RelationshipLifecycleState(str, Enum):
+    """Lifecycle states for cross-sheet relationship candidates."""
+    DISCOVERED = "DISCOVERED"
+    NEEDS_CONFIRMATION = "NEEDS_CONFIRMATION"
+    CONFIRMED = "CONFIRMED"
+    REJECTED = "REJECTED"
+    INVALIDATED = "INVALIDATED"
+    STALE = "STALE"
+
+
+class RelationshipCardinality(str, Enum):
+    """Cardinality of cross-sheet relationships."""
+    ONE_TO_ONE = "1:1"
+    ONE_TO_MANY = "1:N"
+    MANY_TO_MANY = "N:M"
+    AMBIGUOUS = "ambiguous"
+
+
+class CandidateRelationshipDescriptor(BaseModel):
+    """
+    Contract 2.3.0 representation of an exported candidate relationship edge.
+    Matches Laravel SpreadsheetRelationshipGraph::toPythonCandidateRelationships() output.
+    """
+    id: Optional[str] = None
+    from_sheet: str
+    from_column: str
+    from_column_ids: List[str] = Field(default_factory=list)
+    to_sheet: str
+    to_column: str
+    to_column_ids: List[str] = Field(default_factory=list)
+    cardinality: str = RelationshipCardinality.ONE_TO_MANY.value
+    confidence: float = 1.0
+    is_junction: bool = False
+    inclusion_ratio: float = 1.0
+    state: str = RelationshipLifecycleState.DISCOVERED.value
+    contract_version: str = "2.3.0"
+
+
+class DiscoveredRelationshipEdge(BaseModel):
+    """
+    Contract 2.3.0 detailed relationship edge representation.
+    Matches Laravel DiscoveredRelationshipEdge::toArray() output.
+    """
+    id: str
+    source_sheet: str
+    source_column_ids: List[str] = Field(default_factory=list)
+    source_headers: List[str] = Field(default_factory=list)
+    target_sheet: str
+    target_column_ids: List[str] = Field(default_factory=list)
+    target_headers: List[str] = Field(default_factory=list)
+    cardinality: str = RelationshipCardinality.ONE_TO_MANY.value
+    is_junction_table: bool = False
+    inclusion_ratio: float = 1.0
+    header_similarity: float = 0.0
+    entity_alignment: float = 0.0
+    type_compatibility: float = 0.0
+    confidence: float = 0.0
+    state: str = RelationshipLifecycleState.DISCOVERED.value
+    evidence: List[str] = Field(default_factory=list)
+    orphan_count: int = 0
+    confirmed_by: Optional[int] = None
+    confirmed_at: Optional[str] = None
+    rejection_reason: Optional[str] = None
+
+
+class SpreadsheetRelationshipGraph(BaseModel):
+    """
+    Contract 2.3.0 full spreadsheet relationship graph.
+    Matches Laravel SpreadsheetRelationshipGraph::toArray() output.
+    """
+    graph_version: str = "2.3.0"
+    workspace_id: int
+    document_id: str
+    job_id: Optional[str] = None
+    generation_id: str
+    nodes: Dict[str, Any] = Field(default_factory=dict)
+    edges: Dict[str, DiscoveredRelationshipEdge] = Field(default_factory=dict)
+    ambiguities: List[str] = Field(default_factory=list)
+    discovered_at: Optional[str] = None
+
+
 class DatasetSemanticSchema(BaseModel):
     """
     Domain-agnostic representation of tabular dataset semantics.
@@ -53,12 +134,13 @@ class DatasetSemanticSchema(BaseModel):
     measures: List[str] = Field(default_factory=list)      # Quantifiable measures available for aggregations
     dimensions: List[str] = Field(default_factory=list)    # Categorical fields available for filtering/grouping
     date_fields: List[str] = Field(default_factory=list)   # Temporal columns
-    candidate_relationships: List[Dict[str, str]] = Field(default_factory=list)
+    candidate_relationships: List[Dict[str, Any]] = Field(default_factory=list)
+    relationship_graph: Optional[SpreadsheetRelationshipGraph] = None
     evidence: List[str] = Field(default_factory=list)
     schema_fingerprint: str           # SHA-256 hash of columns, types, and shape
     confidence: float = 1.0
     unresolved_ambiguity: List[str] = Field(default_factory=list)
-    interpreter_version: str = "2.1.0"
+    interpreter_version: str = "2.3.0"
 
 
 class ColumnProfile(BaseModel):
