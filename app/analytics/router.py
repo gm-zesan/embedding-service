@@ -384,24 +384,19 @@ async def upload_analytical_source(
 @router.post("/excel/query")
 async def query_analytical_source(req: ExcelQueryRequest):
     """
-    Query uploaded analytical sources using natural language with format-aware resolution,
-    conversational context, and ambiguity detection.
+    RETIRED ENDPOINT: Direct legacy Excel SQL execution is permanently disabled.
+    All spreadsheet analytics must use the Contract 3.0 Virtual Execution Gateway (/analytics/v3/execute).
     """
-    try:
-        result = excel_engine.query_excel(
-            workspace_id=req.workspace_id,
-            file_id=req.file_id,
-            question=req.question,
-            history=req.history,
-            currency_hint=req.currency_hint,
-        )
-        return result
-    except Exception as e:
-        logger.error(f"[Source Query] Query failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to execute document query: {str(e)}",
-        )
+    logger.warning(
+        f"[Legacy Route Rejected] Direct Excel query attempted on retired endpoint for workspace {req.workspace_id}"
+    )
+    return {
+        "success": False,
+        "status": "retired",
+        "report": "Direct legacy Excel query execution is permanently retired. All spreadsheet queries must be authorized through Contract 3.0 (/analytics/v3/execute).",
+        "rows": [],
+        "error": "ENDPOINT_RETIRED",
+    }
 
 
 # ── Unified Analytics Dispatch Router ─────────────────────────────
@@ -410,40 +405,25 @@ async def query_analytical_source(req: ExcelQueryRequest):
 async def query_analytics(req: AnalyticsQueryRequest):
     """
     Unified analytics endpoint:
-    1. If engine == 'excel' or 'data_source', or if explicit file_id is provided, dispatches to Source Analytics Engine.
-    2. Otherwise, executes semantic natural language SQL pipeline on production DB,
-       with safe fallback to document analytics if query refers to uploaded datasets.
+    1. If engine == 'excel' or 'data_source', or if explicit file_id is provided, rejects direct legacy spreadsheet execution.
+    2. Otherwise, executes semantic natural language SQL pipeline on production DB.
     """
     t_start = time.perf_counter()
     query = req.query.strip()
     workspace_id = req.workspace_id
 
-    # 1. Direct Data Source Analytics Request
+    # 1. Direct Data Source Analytics Request (Permanently Retired)
     if req.engine in ("excel", "data_source") or req.file_id:
-        doc_res = excel_engine.query_excel(
-            workspace_id=workspace_id,
-            file_id=req.file_id,
-            question=query,
-            history=req.history,
-            currency_hint=req.currency_hint,
+        logger.warning(
+            f"[Legacy Dispatch Rejected] Direct engine={req.engine} attempted on retired endpoint for workspace {workspace_id}"
         )
         return AnalyticsQueryResponse(
-            success=doc_res.get("success", False),
+            success=False,
             intent="document_source_query",
-            report=doc_res.get("report", ""),
-            sql=doc_res.get("sql"),
-            rows=doc_res.get("rows", []),
-            is_security_rejection=False,
-            is_ambiguous=doc_res.get("is_ambiguous", False),
-            is_cross_source_unsupported=doc_res.get("is_cross_source_unsupported", False),
-            clarification_options=doc_res.get("clarification_options"),
-            candidates=doc_res.get("candidates"),
-            filename=doc_res.get("filename"),
-            source_id=doc_res.get("source_id"),
-            latency_ms=doc_res.get("latency_ms", 0.0),
-            engine="document_virtual_db",
-            provider_used="document_sql_planner",
-            fallback_triggered=False,
+            report="Direct legacy spreadsheet query execution is permanently retired. Use Contract 3.0 (/analytics/v3/execute).",
+            sql=None,
+            rows=[],
+            is_security_rejection=True,
         )
 
     # 2. Check if query explicitly mentions an uploaded source/file/sheet
@@ -456,26 +436,17 @@ async def query_analytics(req: AnalyticsQueryRequest):
             context=None,
         )
         if res.status == ResolutionStatus.RESOLVED and res.source:
-            doc_res = excel_engine.query_excel(
-                workspace_id=workspace_id,
-                file_id=res.source.source_id,
-                question=query,
-                history=req.history,
+            logger.warning(
+                f"[Legacy Dispatch Blocked] Document source query attempted via ungoverned /analytics/query for workspace {workspace_id}"
             )
-            if doc_res.get("success") and doc_res.get("rows"):
-                return AnalyticsQueryResponse(
-                    success=True,
-                    intent="document_source_query",
-                    report=doc_res["report"],
-                    sql=doc_res.get("sql"),
-                    rows=doc_res.get("rows", []),
-                    is_security_rejection=False,
-                    is_ambiguous=False,
-                    latency_ms=doc_res.get("latency_ms", 0.0),
-                    engine="document_virtual_db",
-                    provider_used="document_sql_planner",
-                    fallback_triggered=False,
-                )
+            return AnalyticsQueryResponse(
+                success=False,
+                intent="document_source_query",
+                report="Direct legacy spreadsheet query execution is permanently retired. All spreadsheet queries must be authorized through Contract 3.0 (/analytics/v3/execute).",
+                sql=None,
+                rows=[],
+                is_security_rejection=True,
+            )
 
     # -------------------------------------------------------------
     # Primary Pipeline: Phase 3.x Generic Semantic Analytics Engine
@@ -485,28 +456,6 @@ async def query_analytics(req: AnalyticsQueryRequest):
         llm_latency = meta.get("latency_ms", 0.0)
 
         if plan.is_security_rejection:
-            if plan.rejection_reason == "out_of_domain":
-                doc_fallback = excel_engine.query_excel(
-                    workspace_id=workspace_id,
-                    file_id=req.file_id,
-                    question=query,
-                    history=req.history,
-                )
-                if doc_fallback.get("success") and doc_fallback.get("rows"):
-                    return AnalyticsQueryResponse(
-                        success=True,
-                        intent="document_source_fallback",
-                        report=doc_fallback["report"],
-                        sql=doc_fallback.get("sql"),
-                        rows=doc_fallback.get("rows", []),
-                        is_security_rejection=False,
-                        is_ambiguous=False,
-                        latency_ms=doc_fallback.get("latency_ms", 0.0),
-                        engine="document_virtual_db",
-                        provider_used="document_sql_planner",
-                        fallback_triggered=True,
-                    )
-
             report = formatter.format(query, plan, [], latency_ms=llm_latency)
             return AnalyticsQueryResponse(
                 success=True,
@@ -544,27 +493,6 @@ async def query_analytics(req: AnalyticsQueryRequest):
         # Semantic Validation
         val_res = validator.validate_plan(plan)
         if not val_res.is_valid:
-            doc_fallback = excel_engine.query_excel(
-                workspace_id=workspace_id,
-                file_id=req.file_id,
-                question=query,
-                history=req.history,
-            )
-            if doc_fallback.get("success") and doc_fallback.get("rows"):
-                return AnalyticsQueryResponse(
-                    success=True,
-                    intent="document_source_fallback",
-                    report=doc_fallback["report"],
-                    sql=doc_fallback.get("sql"),
-                    rows=doc_fallback.get("rows", []),
-                    is_security_rejection=False,
-                    is_ambiguous=False,
-                    latency_ms=doc_fallback.get("latency_ms", 0.0),
-                    engine="document_virtual_db",
-                    provider_used="document_sql_planner",
-                    fallback_triggered=True,
-                )
-
             logger.warning(f"[Phase 3.x] Semantic validation failed: {val_res.errors}")
             error_details = "\n".join(f"- {err}" for err in val_res.errors)
             report = (
@@ -636,3 +564,135 @@ async def query_analytics(req: AnalyticsQueryRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Analytics query execution failed: {str(e)}",
         )
+
+
+# ===========================================================================
+# Contract 3.0.0 Endpoints (Phase 3 Milestone 3.0 Foundation)
+# ===========================================================================
+
+from app.analytics.contract_v3 import (
+    CONTRACT_VERSION_3_0,
+    AnalyticsPrepareRequest,
+    PreparedQueryArtifact,
+    ExecutionAuthorizationGrant,
+    AnalyticsExecuteRequest,
+    AnalyticsExecutionResponse,
+    DynamicSchemaCatalog,
+)
+from app.analytics.virtual_compiler import virtual_compiler, VirtualCompilerError
+from app.analytics.virtual_catalog import virtual_catalog_builder
+from app.analytics.virtual_planner import virtual_semantic_planner
+from app.analytics.execution_gateway import virtual_execution_gateway, ExecutionGatewaySecurityError
+
+
+class PlanCandidateRequest(BaseModel):
+    workspace_id: int = Field(..., gt=0)
+    dataset_id: str
+    question: str
+    history: Optional[List[Dict[str, str]]] = None
+
+
+@router.post("/v3/plan-candidate", response_model=SemanticQueryPlan)
+def plan_query_candidate(req: PlanCandidateRequest):
+    """
+    Candidate generation endpoint: Generates a SemanticQueryPlan AST from question
+    without any SQL generation.
+    """
+    try:
+        source = source_registry.get_source(req.workspace_id, req.dataset_id)
+        db_path = source.db_path if source else None
+        if not db_path:
+            storage_dir = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")), "storage", "excel_databases")
+            clean_dataset = "".join(c for c in req.dataset_id if c.isalnum() or c in ("-", "_"))[:64]
+            candidate_path = os.path.join(storage_dir, f"ws_{req.workspace_id}_{clean_dataset}.sqlite")
+            if os.path.exists(candidate_path):
+                db_path = candidate_path
+
+        if not db_path or not os.path.exists(db_path):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Dataset {req.dataset_id} database not found.")
+
+        generation_id = getattr(source, "generation_id", None) or req.dataset_id
+        catalog = virtual_catalog_builder.build_from_sqlite(
+            db_path=db_path,
+            workspace_id=req.workspace_id,
+            dataset_id=req.dataset_id,
+            generation_id=str(generation_id),
+        )
+
+        plan = virtual_semantic_planner.plan_query(
+            question=req.question,
+            catalog=catalog,
+            history=req.history,
+        )
+        return plan
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Contract 3.0 Plan Candidate] Error: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/v3/prepare", response_model=PreparedQueryArtifact)
+def prepare_virtual_query(req: AnalyticsPrepareRequest):
+    """
+    Stage A: Compiles SemanticQueryPlan into PreparedQueryArtifact.
+    DOES NOT EXECUTE SQL.
+    """
+    try:
+        catalog = req.catalog
+        if not catalog:
+            source = source_registry.get_source(req.workspace_id, req.dataset_id)
+            db_path = source.db_path if source else None
+            if not db_path:
+                storage_dir = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")), "storage", "excel_databases")
+                clean_dataset = "".join(c for c in req.dataset_id if c.isalnum() or c in ("-", "_"))[:64]
+                candidate_path = os.path.join(storage_dir, f"ws_{req.workspace_id}_{clean_dataset}.sqlite")
+                if os.path.exists(candidate_path):
+                    db_path = candidate_path
+
+            if not db_path or not os.path.exists(db_path):
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Database for dataset {req.dataset_id} not found.")
+
+            catalog = virtual_catalog_builder.build_from_sqlite(
+                db_path=db_path,
+                workspace_id=req.workspace_id,
+                dataset_id=req.dataset_id,
+                generation_id=req.generation_id,
+                relationship_graph=req.relationship_graph,
+                source_descriptors=req.source_descriptors,
+            )
+
+        artifact = virtual_compiler.compile(
+            plan=req.query_plan,
+            catalog=catalog,
+            relationship_graph=req.relationship_graph,
+        )
+        artifact.request_id = req.request_id
+        return artifact
+    except VirtualCompilerError as vce:
+        logger.warning(f"[Contract 3.0 Prepare] Virtual compiler error: {vce}")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(vce))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Contract 3.0 Prepare] Unexpected error: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/v3/execute", response_model=AnalyticsExecutionResponse)
+def execute_virtual_query(req: AnalyticsExecuteRequest):
+    """
+    Stage C: Executes authorized prepared query against isolated virtual SQLite.
+    Validates HMAC signature, expiry, replay cache, and query fingerprint.
+    """
+    try:
+        response = virtual_execution_gateway.execute_authorized_query(req)
+        return response
+    except ExecutionGatewaySecurityError as egse:
+        logger.warning(f"[Contract 3.0 Execute] Security error: {egse} (code={egse.code})")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"message": str(egse), "code": egse.code})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Contract 3.0 Execute] Unexpected error: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

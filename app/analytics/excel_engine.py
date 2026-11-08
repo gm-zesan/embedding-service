@@ -343,11 +343,12 @@ class ExcelDatabaseEngine:
         self,
         db_path: str,
         sql: str,
+        params: Optional[List[Any]] = None,
         timeout: Optional[float] = None,
         max_results: int = 50,
     ) -> Tuple[List[Dict[str, Any]], List[str]]:
         """
-        Executes a read-only SQL query against an isolated SQLite database file.
+        Executes a read-only parameterized SQL query against an isolated SQLite database file.
         Enforces read-only PRAGMA and query execution deadline via set_progress_handler.
         Returns (rows, column_names).
         Raises TimeoutError on query deadline exceeded.
@@ -378,7 +379,7 @@ class ExcelDatabaseEngine:
         try:
             conn.execute("PRAGMA query_only = ON;")
             cursor = conn.cursor()
-            cursor.execute(sql)
+            cursor.execute(sql, params or [])
             results = cursor.fetchall()
             col_names = list(results[0].keys()) if results else []
             rows = [dict(r) for r in results[:max_results]]
@@ -495,63 +496,41 @@ class ExcelDatabaseEngine:
             if lines:
                 history_block = "<RECENT_CONVERSATION_CONTEXT>\n" + "\n".join(lines) + "\n</RECENT_CONVERSATION_CONTEXT>\n\n"
 
-        system_prompt = f"""You are an Expert SQLite Database Analytics Engineer.
-Your task is to translate natural language business questions into valid, optimized, read-only SQLite SQL queries against an uploaded spreadsheet database.
+        # ── 4. Virtual Semantic Planning & Relational Compilation ────
+        # Phase 3 Milestone 3.0: Eliminating raw LLM SQL generation.
+        from app.analytics.virtual_planner import virtual_semantic_planner
+        from app.analytics.virtual_compiler import virtual_compiler
+        from app.analytics.virtual_catalog import virtual_catalog_builder
 
-<DATABASE_SCHEMA>
-{schema_catalog}
-</DATABASE_SCHEMA>
-
-STRICT RULES:
-1. Generate ONLY SELECT statements. NEVER generate INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, ATTACH, DETACH, or PRAGMA statements.
-2. Use exact table names and column names from the schema catalog above.
-3. For text filtering, use LIKE '%value%' or LOWER(column) = LOWER('value') to ensure case-insensitive matching. Never include Bengali grammatical particles or inflections (e.g. 'er', 'r', 'ta', 'te', 'এর', 'র', 'টা') in the SQL filter value (e.g. for "Rice er stock" or "Rice-er stock", filter by product_name LIKE '%Rice%').
-4. If the question asks about a specific product/person/entity (e.g. "Oil er stock", "Rice er price"), include a WHERE filter for that entity (e.g. WHERE LOWER(product_name) LIKE '%oil%'). If the user asks for an overall sheet total/count (e.g. "total stock", "all products"), aggregate across the whole table without an entity filter.
-5. If the user asks for a total, use SUM(column). If count, use COUNT(*). If average, use AVG(column).
-5. Always round averages or monetary aggregations to 2 decimal places: ROUND(AVG(col), 2).
-6. When comparing or grouping across sheets/tabs, perform a standard JOIN on matching ID or name columns.
-7. Return ONLY a valid JSON object:
-{{
-  "sql": "SELECT ...",
-  "explanation": "Short summary of what this query calculates"
-}}
-"""
-
-        user_content = f"{history_block}Current Business Question: {question}"
-
-        # ── 4. Call LLM for Query Planning ───────────────────────────
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-            temperature=0.0,
-            max_tokens=1024,
-            response_format={"type": "json_object"},
-            extra_body={"thinking": {"type": "disabled"}}
+        generation_id = getattr(target_source, "generation_id", None) or getattr(target_source, "source_id", "gen_default")
+        catalog = virtual_catalog_builder.build_from_sqlite(
+            db_path=db_path,
+            workspace_id=workspace_id,
+            dataset_id=target_source.source_id,
+            generation_id=str(generation_id),
         )
 
-        res_text = response.choices[0].message.content.strip()
-        parsed = json.loads(res_text)
-        sql = parsed.get("sql", "").strip()
+        plan = virtual_semantic_planner.plan_query(
+            question=question,
+            catalog=catalog,
+            history=history,
+        )
 
-        # ── 5. Security & Read-Only Sandbox Guard ─────────────────────
-        clean_sql = sql.lower().strip()
-        forbidden_keywords = ["insert", "update", "delete", "drop", "alter", "create", "attach", "detach", "pragma", "vacuum"]
-        if any(re.search(rf"\b{kw}\b", clean_sql) for kw in forbidden_keywords) or (not clean_sql.startswith("select") and not clean_sql.startswith("with")):
-            return {
-                "success": False,
-                "report": "🛡️ **Security Notice**: Only read-only SELECT queries are allowed on uploaded data sources.",
-                "rows": [],
-                "latency_ms": round((time.perf_counter() - t_start) * 1000, 2),
-            }
+        artifact = virtual_compiler.compile(
+            plan=plan,
+            catalog=catalog,
+            max_limit=50,
+        )
 
-        # ── 6. Execute against Sandboxed SQLite DB (Read-Only & Timeout Enforced) ─
+        sql = artifact.sql_template
+        params = artifact.params
+
+        # ── 5. Execute against Sandboxed SQLite DB (Read-Only & Timeout Enforced) ─
         try:
             rows, col_names = self.execute_sql_query(
                 db_path=db_path,
                 sql=sql,
+                params=params,
                 timeout=self.query_timeout,
                 max_results=50,
             )
