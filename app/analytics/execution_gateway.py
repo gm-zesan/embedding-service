@@ -178,7 +178,7 @@ class VirtualExecutionGateway:
     ):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         self.storage_dir = storage_dir or os.path.join(repo_root, "storage", "excel_databases")
-        self.secret_key = secret_key or os.getenv("ANALYTICS_SECRET_KEY", os.getenv("API_KEY", "fallback_analytics_secret"))
+        self.secret_key = secret_key or os.getenv("ANALYTICS_SECRET_KEY") or os.getenv("API_KEY") or "fallback_analytics_secret"
         self.query_timeout = query_timeout or getattr(config, "ANALYTICS_QUERY_TIMEOUT_SECONDS", 15.0)
         self.max_rows = max_rows
         self.formatter = AnalyticsFormatter()

@@ -690,7 +690,7 @@ def execute_virtual_query(req: AnalyticsExecuteRequest):
         return response
     except ExecutionGatewaySecurityError as egse:
         logger.warning(f"[Contract 3.0 Execute] Security error: {egse} (code={egse.code})")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"message": str(egse), "code": egse.code})
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"{str(egse)} (code={egse.code})")
     except HTTPException:
         raise
     except Exception as e:
