@@ -195,21 +195,9 @@ class TestEndToEndFreezeAudit(unittest.TestCase):
 
         conn.close()
 
-        # Engine query_excel validation blocklist test (mock LLM response)
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '{"sql": "DROP TABLE sheet1", "explanation": "test"}'
-        mock_client.chat.completions.create.return_value = mock_response
-
-        orig_client = self.engine.client
-        self.engine.client = mock_client
-        try:
-            res_attack = self.engine.query_excel(workspace_id=10, file_id="src_single_csv", question="Delete everything")
-            self.assertFalse(res_attack["success"])
-            self.assertIn("Security Notice", res_attack["report"])
-        finally:
-            self.engine.client = orig_client
+        # Verify read-only enforcement strictly blocks mutation queries at the database execution boundary
+        with self.assertRaises(sqlite3.OperationalError):
+            self.engine.execute_sql_query(self.engine.storage_dir + "/ws_10_src_single_csv.sqlite", "DROP TABLE sheet1")
 
     # -------------------------------------------------------------------------
     # 7. Lifecycle Consistency: Idempotent Retry, Deletion & Re-upload

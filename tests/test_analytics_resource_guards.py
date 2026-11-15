@@ -183,7 +183,7 @@ class TestAnalyticsResourceGuards(unittest.TestCase):
             )
         ]
 
-        with patch.object(self.engine.client.chat.completions, "create", return_value=fake_llm_response):
+        with patch.object(self.engine, "execute_sql_query", side_effect=TimeoutError("The database query exceeded the execution time limit (5.0s) and was safely stopped.")):
             result = self.engine.query_excel(
                 workspace_id=9,
                 file_id=meta["file_id"],

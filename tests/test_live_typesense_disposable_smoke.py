@@ -27,18 +27,10 @@ WORKSPACE_B = 902
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 dotenv.load_dotenv(os.path.join(repo_root, ".env"))
 
-# Force isolated port and collection
-os.environ["TYPESENSE_PORT"] = str(DISPOSABLE_PORT)
-os.environ["TYPESENSE_COLLECTION"] = DISPOSABLE_COLLECTION
-
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
 from app import config
-# Ensure config has updated values
-config.TYPESENSE_PORT = DISPOSABLE_PORT
-config.TYPESENSE_COLLECTION = DISPOSABLE_COLLECTION
-
 from app.typesense_engine import (
     get_typesense_client,
     ensure_faq_collection,
@@ -56,6 +48,17 @@ class TestLiveTypesenseCrossTenantDeletion(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        # Save original config to preserve suite-level test hygiene
+        cls._orig_port = config.TYPESENSE_PORT
+        cls._orig_col = config.TYPESENSE_COLLECTION
+        cls._orig_env_port = os.environ.get("TYPESENSE_PORT")
+        cls._orig_env_col = os.environ.get("TYPESENSE_COLLECTION")
+
+        os.environ["TYPESENSE_PORT"] = str(DISPOSABLE_PORT)
+        os.environ["TYPESENSE_COLLECTION"] = DISPOSABLE_COLLECTION
+        config.TYPESENSE_PORT = DISPOSABLE_PORT
+        config.TYPESENSE_COLLECTION = DISPOSABLE_COLLECTION
+
         # ── Invariant Guardrails ──────────────────────────────────────────────
         if config.TYPESENSE_PORT == 8108:
             raise RuntimeError("SAFETY ABORT: Refusing to run smoke test against primary port 8108!")
@@ -74,6 +77,21 @@ class TestLiveTypesenseCrossTenantDeletion(unittest.TestCase):
 
         # ── Ensure Schema on Disposable Instance ──────────────────────────────
         ensure_faq_collection(cls.client)
+
+    @classmethod
+    def tearDownClass(cls):
+        # Restore configuration to prevent pollution of subsequent tests
+        config.TYPESENSE_PORT = cls._orig_port
+        config.TYPESENSE_COLLECTION = cls._orig_col
+        if cls._orig_env_port is not None:
+            os.environ["TYPESENSE_PORT"] = cls._orig_env_port
+        else:
+            os.environ.pop("TYPESENSE_PORT", None)
+
+        if cls._orig_env_col is not None:
+            os.environ["TYPESENSE_COLLECTION"] = cls._orig_env_col
+        else:
+            os.environ.pop("TYPESENSE_COLLECTION", None)
 
     def test_live_cross_tenant_deletion_with_colliding_ids(self):
         """

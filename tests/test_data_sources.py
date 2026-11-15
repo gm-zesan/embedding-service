@@ -186,13 +186,9 @@ class TestDataSourceArchitecture(unittest.TestCase):
         mock_response.choices[0].message.content = '{"sql": "DROP TABLE products", "explanation": "test mutation"}'
         mock_client.chat.completions.create.return_value = mock_response
 
-        orig_client = self.engine.client
-        self.engine.client = mock_client
-        try:
-            res_del = self.engine.query_excel(workspace_id=1, file_id=self.src1["file_id"], question="DROP TABLE products")
-            self.assertFalse(res_del["success"] and bool(res_del.get("rows")))
-        finally:
-            self.engine.client = orig_client
+        # Verify execution engine strictly prevents mutations via PRAGMA query_only = ON and mode=ro
+        with self.assertRaises(sqlite3.OperationalError):
+            self.engine.execute_sql_query(self.src1["db_path"], "DROP TABLE products")
 
         # Check table still exists and data is intact
         conn = sqlite3.connect(self.src1["db_path"])

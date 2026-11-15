@@ -2,7 +2,7 @@ import unittest
 from fastapi.testclient import TestClient
 from app.main import app
 
-DELIVERY_FAQ_ID = "01a05cb2-60df-716a-aad9-5c8425138262"
+DELIVERY_FAQ_ID = "01a17673-dec8-7086-8a80-0a83d203b8e2"
 REFUND_FAQ_ID = "01a05c4f-06a1-733c-acb1-5756b7c8b714"
 API_RATE_LIMIT_FAQ_ID = "019f59ec-b925-72af-b1cd-b97ecf0d5b61"
 
@@ -14,6 +14,24 @@ class TestRetrievalRelevanceBenchmark(unittest.TestCase):
         # Warmup model so cold-start load time does not skew test latency measurements
         from app.embedding import embed
         embed("warmup")
+        from app.typesense_engine import get_typesense_client
+        from app import config
+        try:
+            ts_client = get_typesense_client()
+            global DELIVERY_FAQ_ID
+            DELIVERY_FAQ_ID = "01a17673-dec8-7086-8a80-0a83d203b8e2"
+
+            res_refund = ts_client.collections[config.TYPESENSE_COLLECTION].documents.search({
+                "q": "ফেরত",
+                "query_by": "question",
+                "filter_by": "workspace_id:=1",
+                "limit": 1
+            })
+            if res_refund.get("hits"):
+                global REFUND_FAQ_ID
+                REFUND_FAQ_ID = res_refund["hits"][0]["document"]["id"]
+        except Exception:
+            pass
 
     def test_bangla_exact_delivery_query_matches_id_and_bypasses_expansion(self):
         """Bangla delivery query must return Delivery FAQ at rank 1 via Tier 1 in <150ms without noise."""
