@@ -17,9 +17,85 @@ from app.typesense_engine import execute_hybrid_search, get_typesense_client
 logger = logging.getLogger("retrieval_engine")
 
 
+# Unicode artifacts to strip
+_ZERO_WIDTH_CHARS = re.compile(r"[\u200b\u200c\u200d\ufeff]")
+
+# Common Bengali spelling normalizations (GAP-RET-05)
+_BENGALI_SPELLING_VARIANTS = [
+    (re.compile(r"(?<![^\s,;.!?])কী(?![^\s,;.!?])"), "কি"),
+    (re.compile(r"ওয়"), "ওয়"),
+    (re.compile(r"ওয়ারেন্টি"), "ওয়ারেন্টি"),
+    (re.compile(r"কুরিয়ার"), "কুরিয়ার"),
+    (re.compile(r"ডেলিভারী"), "ডেলিভারি"),
+    (re.compile(r"পলিসী"), "পলিসি"),
+    (re.compile(r"কোম্পানী"), "কোম্পানি"),
+    (re.compile(r"ডিসকাওন্ট"), "ডিসকাউন্ট"),
+    (re.compile(r"ষ্টোর"), "স্টোর"),
+    (re.compile(r"অরডার"), "অর্ডার"),
+]
+
+# Fast local Banglish-to-Bengali vocabulary mapping for instant candidate expansion (< 1ms) (GAP-RET-04)
+_BANGLISH_TO_BANGLA = {
+    "koto": "কত",
+    "dam": "দাম",
+    "daam": "দাম",
+    "damer": "দামের",
+    "kivabe": "কিভাবে",
+    "kibhabe": "কিভাবে",
+    "kobe": "কবে",
+    "kokhon": "কখন",
+    "pabo": "পাব",
+    "paowa": "পাওয়া",
+    "ache": "আছে",
+    "asen": "আছেন",
+    "kothay": "কোথায়",
+    "kothai": "কোথায়",
+    "charz": "চার্জ",
+    "charge": "চার্জ",
+    "ferot": "ফেরত",
+    "feroth": "ফেরত",
+    "dekhte": "দেখতে",
+    "kinte": "কিনতে",
+    "chara": "ছাড়া",
+    "bade": "বাদে",
+    "notun": "নতুন",
+    "puran": "পুরানো",
+    "purano": "পুরানো",
+    "khula": "খোলা",
+    "bondho": "বন্ধ",
+    "somoy": "সময়",
+    "shokal": "সকাল",
+    "raat": "রাত",
+    "thikana": "ঠিকানা",
+    "jogajog": "যোগাযোগ",
+    "ovijog": "অভিযোগ",
+    "sahajjo": "সাহায্য",
+    "bhalo": "ভালো",
+    "shob": "সব",
+}
+
+
 def preprocess_query(query: str) -> str:
-    """Lightweight query preprocessing: strip extra whitespace and normalize."""
-    return " ".join(query.strip().split())
+    """Lightweight query preprocessing: normalize unicode, Bengali spelling, and fast Banglish transliteration."""
+    clean = _ZERO_WIDTH_CHARS.sub("", query)
+    clean = " ".join(clean.strip().split())
+
+    for pat, repl in _BENGALI_SPELLING_VARIANTS:
+        clean = pat.sub(repl, clean)
+
+    # Detect Banglish tokens and append corresponding Bengali equivalents for instant hybrid recall
+    words = re.findall(r"\b[a-zA-Z]+\b", clean.lower())
+    appended_bangla = []
+    for w in words:
+        if w in _BANGLISH_TO_BANGLA:
+            bn_word = _BANGLISH_TO_BANGLA[w]
+            if bn_word not in clean and bn_word not in appended_bangla:
+                appended_bangla.append(bn_word)
+
+    if appended_bangla:
+        return f"{clean} {' '.join(appended_bangla)}"
+
+    return clean
 
 
 # ---------------------------------------------------------------------------

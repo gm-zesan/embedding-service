@@ -522,6 +522,19 @@ class DataSourceResolver:
                         matching_b.append((s, d))
 
             if matching_a and matching_b:
+                # If both datasets belong to the same source (e.g. multi-sheet workbook), resolve both datasets (GAP-XLS-04)
+                if matching_a[0][0].source_id == matching_b[0][0].source_id:
+                    primary_src = matching_a[0][0]
+                    selected_dsets = [matching_a[0][1], matching_b[0][1]]
+                    return SourceResolutionResult(
+                        status=ResolutionStatus.RESOLVED,
+                        source_id=primary_src.source_id,
+                        source=primary_src,
+                        dataset_ids=[d.dataset_id for d in selected_dsets],
+                        selected_datasets=selected_dsets,
+                        reason=f"Multi-dataset match within single source ({cat_a.value} + {cat_b.value}).",
+                    )
+
                 candidate_list = []
                 for s, d in matching_a[:2] + matching_b[:2]:
                     candidate_list.append({
