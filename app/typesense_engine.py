@@ -89,6 +89,7 @@ def execute_hybrid_search(
     query_vector: Optional[List[float]] = None,
     workspace_id: Optional[int] = None,
     top_k: int = 5,
+    document_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute Typesense search: hybrid vector+text if query_vector is provided, or pure BM25 keyword search if query_vector is None."""
     search_query = {
@@ -106,6 +107,10 @@ def execute_hybrid_search(
     filter_clauses = ['is_active:=true']
     if workspace_id is not None:
         filter_clauses.append(f'workspace_id:={workspace_id}')
+    if document_type:
+        clean_doc_type = str(document_type).strip()
+        if clean_doc_type:
+            filter_clauses.append(f'document_type:={clean_doc_type}')
 
     search_query['filter_by'] = ' && '.join(filter_clauses)
 

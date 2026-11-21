@@ -1,9 +1,10 @@
 import asyncio
 import logging
+import re
 import time
 # pyrefly: ignore [missing-import]
 import httpx
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import HTTPException
 try:
     from app.embedding import embed
@@ -147,10 +148,88 @@ def parse_typesense_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # Post-Retrieval Candidate Reranker (B1 Action Alignment & B2 Multi-Entity)
 # ---------------------------------------------------------------------------
 
+def rerank_candidates(
+    query: str,
+    candidates: List[Dict[str, Any]],
+    contextual_signal: Optional[str] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Candidate Precision Reranker (Semantic Overlap, Polarity Guard & Entity Alignment).
+    Re-scores and re-orders candidate documents before LLM consumption to maximize top-1 precision.
+    """
+    t_start = time.time()
+    if not candidates:
+        return candidates, {
+            "reranker_applied": False,
+            "rerank_ms": 0.0,
+            "reranker_reason": None,
+        }
 
+    clean_q = query.lower().strip()
+    q_tokens = set(re.findall(r'[\w\u0980-\u09FF]+', clean_q))
 
+    # Polar / distinguishing token sets to prevent near-miss false positives
+    polar_pairs = [
+        ({"বাইরে", "bair", "outside"}, {"ভেতরে", "মধ্যে", "ভিতরে", "inside"}),
+        ({"ফ্রি", "free"}, {"পেইড", "টাকা", "paid", "charge"}),
+        ({"রিটার্ন", "ফেরত", "return", "refund"}, {"ডেলিভারি", "delivery", "shipping"}),
+        ({"ক্যাশ", "cod", "cash"}, {"অনলাইন", "বিকাশ", "bkash", "card", "nagad"}),
+    ]
 
-# ---------------------------------------------------------------------------
+    reranked = []
+    for cand in candidates:
+        c_q = cand.get("question", "").lower()
+        c_a = cand.get("answer", "").lower()
+        combined_text = f"{c_q} {c_a}"
+        doc_tokens = set(re.findall(r'[\w\u0980-\u09FF]+', combined_text))
+
+        # 1. Token overlap against question target
+        q_target_tokens = set(re.findall(r'[\w\u0980-\u09FF]+', c_q))
+        overlap_q = len(q_tokens & q_target_tokens) / max(1, len(q_tokens | q_target_tokens))
+
+        # 2. Polarity alignment check
+        polarity_penalty = 0.0
+        polarity_boost = 0.0
+        for pos_set, neg_set in polar_pairs:
+            q_has_pos = bool(q_tokens & pos_set)
+            q_has_neg = bool(q_tokens & neg_set)
+            doc_has_pos = bool(doc_tokens & pos_set)
+            doc_has_neg = bool(doc_tokens & neg_set)
+
+            if q_has_pos and doc_has_pos:
+                polarity_boost += 0.08
+            elif q_has_pos and doc_has_neg and not doc_has_pos:
+                polarity_penalty += 0.12
+
+            if q_has_neg and doc_has_neg:
+                polarity_boost += 0.08
+            elif q_has_neg and doc_has_pos and not doc_has_neg:
+                polarity_penalty += 0.12
+
+        # 3. Exact phrase containment boost
+        exact_boost = 0.0
+        if clean_q and (clean_q in c_q or c_q in clean_q):
+            exact_boost = 0.08
+
+        # Calibrate base score with rerank adjustments
+        orig_score = float(cand.get("score", 0.0))
+        adj_score = orig_score + (overlap_q * 0.12) + exact_boost + polarity_boost - polarity_penalty
+        new_score = round(max(0.0, min(0.99, adj_score)), 4)
+
+        cand_copy = dict(cand)
+        cand_copy["score"] = new_score
+        cand_copy["rerank_delta"] = round(new_score - orig_score, 4)
+        reranked.append(cand_copy)
+
+    # Sort strictly by calibrated score, then by document priority
+    reranked.sort(key=lambda r: (r["score"], r.get("priority", 0)), reverse=True)
+    elapsed_ms = round((time.time() - t_start) * 1000, 2)
+
+    return reranked, {
+        "reranker_applied": True,
+        "rerank_ms": elapsed_ms,
+        "reranker_reason": "token_alignment_and_polarity_guard",
+    }
 # 2-Tier Adaptive Retrieval Execution Engine (MPNet + Fallback LLM Expander)
 # ---------------------------------------------------------------------------
 
@@ -160,6 +239,7 @@ async def search_knowledge_base(
     top_k: int = 5,
     request_id: Optional[str] = None,
     contextual_signal: Optional[str] = None,
+    document_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Tiered Adaptive Retrieval Pipeline:
@@ -229,6 +309,7 @@ async def search_knowledge_base(
         query_vector=raw_vector,
         workspace_id=workspace_id,
         top_k=candidate_pool,
+        document_type=document_type,
     )
     t_typesense_ms = round((time.time() - t_ts_start) * 1000, 2)
     t_tier1_ms = round((time.time() - t1_start) * 1000, 2)
@@ -272,6 +353,7 @@ async def search_knowledge_base(
                 query_vector=t_expand_vec,
                 workspace_id=workspace_id,
                 top_k=candidate_pool,
+                document_type=document_type,
             )
             expand_hits = parse_typesense_hits(expand_search_res.get("hits", []))
 
@@ -282,6 +364,9 @@ async def search_knowledge_base(
                     hit_map[h["id"]] = h
             current_hits = sorted(hit_map.values(), key=lambda x: (x["score"], x["priority"]), reverse=True)[:candidate_pool]
         t_llm_expand_ms = round((time.time() - t_llm_start) * 1000, 2)
+
+    # ── Post-Retrieval Candidate Reranker ─────────────────────────────────────
+    current_hits, rerank_meta = rerank_candidates(clean_query, current_hits, contextual_signal)
 
     # ── Precision Candidate Filtering ─────────────────────────────────────────
     # Filter out low-confidence trailing noise that lacks relevance to the primary query
@@ -316,6 +401,10 @@ async def search_knowledge_base(
         "total_retrieval_latency_ms": total_retrieval_latency_ms,
         "returned_faq_ids": returned_faq_ids,
         "degraded_bm25_fallback": degraded_bm25_fallback,
+        "reranker_applied": rerank_meta.get("reranker_applied", False),
+        "rerank_ms": rerank_meta.get("rerank_ms", 0.0),
+        "reranker_reason": rerank_meta.get("reranker_reason"),
+        "document_type_filter": document_type,
     })
 
     logger.info(

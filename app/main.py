@@ -400,6 +400,7 @@ async def search_faqs(request: SearchRequest, req: Request):
         top_k=request.top_k,
         request_id=request_id,
         contextual_signal=request.contextual_signal,
+        document_type=request.document_type,
     )
 
 

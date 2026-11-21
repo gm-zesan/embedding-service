@@ -48,6 +48,7 @@ class SearchRequest(BaseModel):
     workspace_id: Optional[int] = None
     top_k: int = Field(5, ge=1, le=50)
     contextual_signal: Optional[str] = None
+    document_type: Optional[str] = None
 
 
 class SearchResultItem(BaseModel):
