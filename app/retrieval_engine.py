@@ -231,6 +231,42 @@ _BANGLISH_TO_BANGLA = {
     "torn": "ছিঁড়ে",
     "fellam": "ফেলেছি",
     "ekhon": "এখন",
+    "bikri": "বিক্রি",
+    "shuru": "শুরু",
+    "shesh": "শেষ",
+    "shorom": "শোরুম",
+    "showroom": "শোরুম",
+    "khoti": "ক্ষতি",
+    "porle": "পড়লে",
+    "porbe": "পড়বে",
+    "baki": "বাকি",
+    "bokeya": "বকেয়া",
+    "lav": "লাভ",
+    "somvob": "সম্ভব",
+    "niyom": "নিয়ম",
+    "shortho": "শর্ত",
+    "grava": "গ্রাহক",
+    "grahok": "গ্রাহক",
+    "kompani": "কোম্পানি",
+    "company": "কোম্পানি",
+    "shobcheye": "সবচেয়ে",
+    "sobcheye": "সবচেয়ে",
+    "parcel": "পার্সেল",
+    "parsel": "পার্সেল",
+    "bkash": "বিকাশ",
+    "nagad": "নগদ",
+    "rocket": "রকেট",
+    "upay": "উপায়",
+    "delivery": "ডেলিভারি",
+    "dewa": "দেওয়া",
+    "dite": "দিতে",
+    "dibo": "দিব",
+    "debo": "দিব",
+    "milche": "মিলছে",
+    "pouchate": "পৌঁছাতে",
+    "pouchange": "পৌঁছাবে",
+    "shomoy": "সময়",
+    "somoy": "সময়",
 }
 
 
@@ -387,6 +423,7 @@ def rerank_candidates(
     query: str,
     candidates: List[Dict[str, Any]],
     contextual_signal: Optional[str] = None,
+    query_vector: Optional[List[float]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Candidate Precision Reranker (Semantic Overlap, Polarity Guard & Entity Alignment).
@@ -403,13 +440,25 @@ def rerank_candidates(
     clean_q = query.lower().strip()
     q_tokens = set(re.findall(r'[\w\u0980-\u09FF]+', clean_q))
 
-    # Polar / distinguishing token sets to prevent near-miss false positives
+    # Comprehensive multi-axis polar & distinguishing token sets (10 business axes)
     polar_pairs = [
-        ({"বাইরে", "bair", "outside"}, {"ভেতরে", "মধ্যে", "ভিতরে", "inside"}),
-        ({"ফ্রি", "free"}, {"পেইড", "টাকা", "paid", "charge"}),
-        ({"রিটার্ন", "ফেরত", "return", "refund"}, {"ডেলিভারি", "delivery", "shipping"}),
-        ({"ক্যাশ", "cod", "cash"}, {"অনলাইন", "বিকাশ", "bkash", "card", "nagad"}),
+        ({"বাইরে", "bair", "outside", "বাইরের"}, {"ভেতরে", "মধ্যে", "ভিতরে", "inside", "ভেতরের", "ভিতরের"}),
+        ({"ফ্রি", "free", "বিনামূল্যে", "0%", "০%"}, {"পেইড", "টাকা", "paid", "charge", "fee", "খরচ", "চার্জ", "ফি"}),
+        ({"রিটার্ন", "ফেরত", "return", "refund", "রিফান্ড"}, {"ডেলিভারি", "delivery", "shipping", "শিপিং", "কুরিয়ার", "পৌঁছাতে", "পৌঁছাবে", "পৌঁছে", "পৌঁছানো", "reach", "arrival"}),
+        ({"ক্যাশ", "cod", "cash"}, {"অনলাইন", "বিকাশ", "bkash", "card", "nagad", "নগদ", "কার্ড"}),
+        ({"ভাঙা", "নষ্ট", "ক্ষতিগ্রস্ত", "ত্রুটি", "damaged", "broken", "defective"}, {"অক্ষত", "নতুন", "intact", "unworn", "unused"}),
+        ({"কোম্পানি", "স্টোর", "আমরা", "company", "store"}, {"গ্রাহক", "কাস্টমার", "আপনি", "customer", "user"}),
+        ({"এক্সচেঞ্জ", "বদল", "পরিবর্তন", "exchange", "replace"}, {"রিফান্ড", "টাকা ফেরত", "refund"}),
+        ({"স্টকে আছে", "পাওয়া যাবে", "available", "in stock"}, {"স্টক নেই", "স্টক আউট", "out of stock", "০"}),
+        ({"ট্যাগসহ", "মূল ট্যাগ", "অক্ষত"}, {"ট্যাগ ছাড়া", "ট্যাগ নষ্ট", "ছিঁড়ে", "torn"}),
+        ({"বাতিল", "ক্যানসেল", "cancel"}, {"ডিসপ্যাচ", "পাঠানো", "পৌঁছানো", "delivered"}),
     ]
+
+    # Question-type intent anchors
+    is_price_q = bool(re.search(r'(?:কত|কতো|দাম|চার্জ|ফি|খরচ|price|cost|fee|charge|how\s+much)', clean_q))
+    is_time_q = bool(re.search(r'(?:কবে|কখন|কতদিন|কয়দিন|কখন|সময়|মেয়াদ|কয়টা|timeline|when|how\s+long|hours|days|duration)', clean_q))
+    is_loc_q = bool(re.search(r'(?:কোথায়|কোথাকার|ঠিকানা|শাখা|শোরুম|আউটলেট|where|location|address|outlet|showroom)', clean_q))
+    is_rule_q = bool(re.search(r'(?:নিয়ম|শর্ত|পলিসি|কিভাবে|rules|policy|how|terms)', clean_q))
 
     reranked = []
     for cand in candidates:
@@ -422,7 +471,10 @@ def rerank_candidates(
         q_target_tokens = set(re.findall(r'[\w\u0980-\u09FF]+', c_q))
         overlap_q = len(q_tokens & q_target_tokens) / max(1, len(q_tokens | q_target_tokens))
 
-        # 2. Polarity alignment check
+        # 2. Substantive overlap with answer content
+        overlap_a = len(q_tokens & doc_tokens) / max(1, len(q_tokens))
+
+        # 3. Polarity alignment check
         polarity_penalty = 0.0
         polarity_boost = 0.0
         for pos_set, neg_set in polar_pairs:
@@ -434,21 +486,32 @@ def rerank_candidates(
             if q_has_pos and doc_has_pos:
                 polarity_boost += 0.08
             elif q_has_pos and doc_has_neg and not doc_has_pos:
-                polarity_penalty += 0.12
+                polarity_penalty += 0.15
 
             if q_has_neg and doc_has_neg:
                 polarity_boost += 0.08
             elif q_has_neg and doc_has_pos and not doc_has_neg:
-                polarity_penalty += 0.12
+                polarity_penalty += 0.15
 
-        # 3. Exact phrase containment boost
+        # 4. Question-type intent congruence boost
+        intent_boost = 0.0
+        if is_price_q and any(t in doc_tokens for t in ["টাকা", "চার্জ", "ফি", "দাম", "মূল্য", "price", "fee"]):
+            intent_boost += 0.05
+        if is_time_q and any(t in doc_tokens for t in ["ঘণ্টা", "দিন", "সময়", "কার্যদিবস", "hours", "days", "সকাল", "রাত"]):
+            intent_boost += 0.05
+        if is_loc_q and any(t in doc_tokens for t in ["ঠিকানা", "রোড", "ধানমন্ডি", "আউটলেট", "শোরুম", "বাংলাদেশ", "তাইওয়ান"]):
+            intent_boost += 0.05
+        if is_rule_q and any(t in doc_tokens for t in ["নিয়ম", "শর্ত", "ভিডিও", "অব্যবহৃত", "ট্যাগ"]):
+            intent_boost += 0.05
+
+        # 5. Exact phrase containment boost
         exact_boost = 0.0
         if clean_q and (clean_q in c_q or c_q in clean_q):
             exact_boost = 0.08
 
         # Calibrate base score with rerank adjustments
         orig_score = float(cand.get("score", 0.0))
-        adj_score = orig_score + (overlap_q * 0.12) + exact_boost + polarity_boost - polarity_penalty
+        adj_score = orig_score + (overlap_q * 0.14) + (overlap_a * 0.06) + exact_boost + intent_boost + polarity_boost - polarity_penalty
         new_score = round(max(0.0, min(0.99, adj_score)), 4)
 
         cand_copy = dict(cand)
@@ -601,7 +664,7 @@ async def search_knowledge_base(
         t_llm_expand_ms = round((time.time() - t_llm_start) * 1000, 2)
 
     # ── Post-Retrieval Candidate Reranker ─────────────────────────────────────
-    current_hits, rerank_meta = rerank_candidates(clean_query, current_hits, contextual_signal)
+    current_hits, rerank_meta = rerank_candidates(clean_query, current_hits, contextual_signal, raw_vector)
 
     # ── Precision Candidate Filtering ─────────────────────────────────────────
     # Filter out low-confidence trailing noise that lacks relevance to the primary query
